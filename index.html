@@ -347,7 +347,10 @@
   // state: the mission clock is real wall time; conditions are modelled
   // ==========================================================================
   const LAUNCH = Date.UTC(2026, 2, 14, 6, 0);      // 14 Mar 2026
-  const sim = { lat: 43.6, lon: -1.4, alt: 1180, hdg: 68, drift: 17,
+  // lat/lon start on the null island and askPosition() replaces them with the
+  // browser's own fix when it can get one. Everything downstream follows,
+  // sunrise included.
+  const sim = { lat: 0, lon: 0, alt: 1180, hdg: 68, drift: 17,
                 fuel: 0.62, cloud: 0.22, water: 9.6 };
   let scrub = null;                                 // mission-day float, or null = now
 
@@ -896,9 +899,11 @@
 
   const ZOOMS = [1, 2, 4, 8, 16, 32, 64];
   const SCALES = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
-  const map = { zi: 0, lon: null, lat: null };   // lon/lat null = locked on FF1
+  const Z_DEFAULT = 4;                            // ZOOMS[4] = 16x, a regional view
+  const map = { zi: Z_DEFAULT, lon: null, lat: null };  // lon/lat null = locked on FF1
   let view = null;                               // last drawn frame, read by the drag
   let mapDirty = true, mapDrawn = 0;
+  let fixNote = '';                              // why the position is still 0N 0E
 
   // The map takes the height the column has left over, so its box moves
   // whenever a neighbouring panel collapses or the chrome is re-measured.
@@ -915,7 +920,7 @@
   }
 
   function syncMapCtl() {
-    mapTag.textContent = ZOOMS[map.zi] + '\u00d7';
+    mapTag.textContent = ZOOMS[map.zi] + '\u00d7' + (fixNote ? ' \u00b7 ' + fixNote : '');
     zoomIn.disabled = map.zi >= ZOOMS.length - 1;
     zoomOut.disabled = map.zi <= 0;
     recentre.style.visibility = map.lon === null ? 'hidden' : 'visible';
@@ -1341,8 +1346,46 @@
     requestAnimationFrame(frame);
   }
 
+  // FF1 starts overhead. The position comes from ?lat=&lon= if the URL carries
+  // one, else from the browser's own fix, else it stays on 0N 0E. Nothing
+  // waits on any of it: the dashboard is already running when the fix lands.
+  //
+  // A page inside a cross-origin iframe cannot ask at all - geolocation's
+  // permissions policy defaults to 'self', so the frame needs allow=
+  // "geolocation" from whoever embeds it, and VS Code's Simple Browser does
+  // not set it. That is what the note in the panel title is for: sitting on
+  // 0N 0E with no explanation reads as a bug rather than a refusal.
+  function setPosition(lat, lon, source) {
+    sim.lat = lat;
+    sim.lon = ((lon + 180) % 360 + 360) % 360 - 180;
+    fixNote = '';
+    mapDirty = true;
+    const simEl = document.getElementById('sim');
+    if (simEl) simEl.textContent = source === 'url'
+      ? 'simulated conditions \u00b7 mission clock is real \u00b7 position set by url'
+      : 'simulated conditions \u00b7 mission clock and position are real';
+    syncMapCtl();
+  }
+
+  function askPosition() {
+    const q = new URLSearchParams(location.search);
+    const qLat = parseFloat(q.get('lat')), qLon = parseFloat(q.get('lon'));
+    if (isFinite(qLat) && isFinite(qLon) && Math.abs(qLat) <= 90) {
+      setPosition(qLat, qLon, 'url'); return;
+    }
+    if (!navigator.geolocation) { fixNote = 'no geolocation'; syncMapCtl(); return; }
+    navigator.geolocation.getCurrentPosition(
+      function (fix) { setPosition(fix.coords.latitude, fix.coords.longitude, 'browser'); },
+      function (err) {
+        fixNote = err && err.code === 1 ? 'position refused' : 'no position fix';
+        syncMapCtl();
+      },
+      { timeout: 10000, maximumAge: 600000 });
+  }
+
   buildRows();
   syncMapCtl();
+  askPosition();
   window.addEventListener('resize', resize);
   resize();
   requestAnimationFrame(frame);
