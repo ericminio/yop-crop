@@ -472,17 +472,22 @@
     return items;
   }
 
+  // An envelope is not symmetric about its centre: the canopy reaches 0.86 r
+  // above it, the basket hangs 1.86 r below. Padding equally, as this did,
+  // invented a band of empty sky above the balloons and pushed FF1 low in the
+  // frame. Bound the drawn extents instead, so centring is true.
   const FIT = (function () {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    function probe(p, pad) {
+    function probe(p, padX, padUp, padDown) {
       const s = iso(p);
-      minX = Math.min(minX, s.x-pad); maxX = Math.max(maxX, s.x+pad);
-      minY = Math.min(minY, s.y-pad); maxY = Math.max(maxY, s.y+pad);
+      minX = Math.min(minX, s.x - padX); maxX = Math.max(maxX, s.x + padX);
+      minY = Math.min(minY, s.y - padUp); maxY = Math.max(maxY, s.y + padDown);
     }
     for (let i = 0; i < 360; i++) {
       const a = (i/360)*Math.PI*2;
-      probe(cyl(R_OUT, a, -0.7), 0);
-      probe(cyl(STANDOFF, a, LIFT_H), BALLOON_R * 1.95);
+      probe(cyl(R_OUT, a, -0.7), 0, 0, 0);
+      probe(cyl(STANDOFF, a, LIFT_H),
+            BALLOON_R * 1.03, BALLOON_R * 0.90, BALLOON_R * 1.90);
     }
     return { w: maxX-minX, h: maxY-minY, cx: (minX+maxX)/2, cy: (minY+maxY)/2 };
   })();
@@ -499,9 +504,10 @@
     canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // leave room for the top bar and the timeline
-    const topPad = 92, botPad = h > 700 ? 190 : 158;
+    // the sky actually left to us: below the top strip, above the timeline
+    const topPad = 84, botPad = h > 700 ? 192 : 160;
     const usable = Math.max(160, h - topPad - botPad);
-    scale = Math.min(w / (FIT.w * 1.10), usable / (FIT.h * 0.98));
+    scale = Math.min(w / (FIT.w * 1.06), usable / (FIT.h * 1.02));
     originX = w / 2;
     originY = topPad + usable / 2;
     sizeTimeline();
