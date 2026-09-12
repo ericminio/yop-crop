@@ -56,7 +56,7 @@
   #top.collapsed .cell, #tl.collapsed #tlcanvas, #tl.collapsed .lg { display: none; }
   #top .tab { position: absolute; right: 0; top: 100%; padding: 3px 10px;
     background: rgba(6,17,27,0.72); border: 1px solid var(--edge); border-top: 0; }
-  #top { position: absolute; top: 0; left: 0; right: 0; display: flex; gap: 1px;
+  #top { z-index: 3; position: absolute; top: 0; left: 0; right: 0; display: flex; gap: 1px;
     background: rgba(6,17,27,0.72); border-bottom: 1px solid var(--edge);
     backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px); }
   #top .cell { padding: 7px 13px; border-right: 1px solid rgba(111,224,255,0.12); }
@@ -86,7 +86,7 @@
   .daystrip .now { position: absolute; top: -4px; bottom: -4px; width: 2px;
     background: var(--amber); box-shadow: 0 0 7px var(--amber); }
 
-  .col { position: absolute; top: 92px; bottom: 186px; display: flex; flex-direction: column;
+  .col { z-index: 1; position: absolute; top: 92px; bottom: 186px; display: flex; flex-direction: column;
     gap: 12px; overflow-y: auto; overflow-x: hidden; pointer-events: auto;
     scrollbar-width: none; }
   .col::-webkit-scrollbar { display: none; }
@@ -462,10 +462,26 @@
     const dpr = window.devicePixelRatio || 1, w = window.innerWidth, h = window.innerHeight;
     canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    // Measure the chrome rather than hardcoding it. The timeline's height
+    // changes on a WIDTH media query while the old pads keyed on HEIGHT, so on
+    // a short wide window 18 px of deck sat behind it.
     const topEl = document.getElementById('top'), tlEl = document.getElementById('tl');
-    const topPad = (topEl && topEl.classList.contains('collapsed')) ? 26 : 84;
-    const botPad = (tlEl && tlEl.classList.contains('collapsed'))
-                   ? 34 : (h > 700 ? 192 : 160);
+    const tab = document.getElementById('toptoggle');
+    let topH = topEl ? topEl.getBoundingClientRect().height : 76;
+    if (topEl && topEl.classList.contains('collapsed') && tab) {
+      topH = Math.max(topH, tab.getBoundingClientRect().bottom);
+    }
+    const tlH = tlEl ? tlEl.getBoundingClientRect().height : 178;
+    const topPad = topH + 8, botPad = tlH + 8;
+
+    // the readouts and the side columns follow the same measurements
+    const simEl = document.getElementById('sim');
+    if (simEl) simEl.style.bottom = (tlH + 8) + 'px';
+    const cols = document.querySelectorAll('.col');
+    for (let i = 0; i < cols.length; i++) {
+      cols[i].style.top = topPad + 'px';
+      cols[i].style.bottom = (tlH + 22) + 'px';
+    }
     const usable = Math.max(160, h - topPad - botPad);
     scale = Math.min(w/(FIT.w*1.04), usable/FIT.h);
     originX = w/2; originY = topPad + usable/2;
