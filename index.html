@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yop Crop — Flying Donut Platform</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #8ec5e8; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<script>
+(function () {
+  'use strict';
+
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d');
+
+  // ---------------------------------------------------------------- geometry
+  const SECTIONS = 12;          // like a clock
+  const SUBDIV = 6;             // arc smoothness per section
+  const R_OUT = 280;            // outer radius of the donut
+  const R_IN = 140;             // hole radius
+  const THICK = 44;             // slab thickness
+  const BALLOONS_PER_RING = 12; // 12 outside + 12 inside = 24
+  const BALLOON_R = 34;
+  const H_OUT = 155;            // balloon height above the outer rim
+  const H_IN = 215;             // balloon height above the inner rim
+
+  const GREEN = [86, 160, 62];
+  const BROWN = [140, 96, 54];
+  const ROCK = [108, 88, 72];
+  const ROCK_DARK = [84, 68, 56];
+
+  const BALLOON_COLORS = [
+    [214, 72, 72], [232, 152, 48], [72, 156, 190],
+    [226, 196, 74], [148, 96, 178], [90, 176, 122]
+  ];
+
+  const LIGHT = normalize([-0.55, -0.30, 0.95]);
+
+  function normalize(v) {
+    const m = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / m, v[1] / m, v[2] / m];
+  }
+
+  // isometric projection (unscaled screen units)
+  const COS30 = Math.cos(Math.PI / 6);
+  function iso(p) {
+    return { x: (p[0] - p[1]) * COS30, y: (p[0] + p[1]) * 0.5 - p[2] };
+  }
+  function depth(p) { return p[0] + p[1] + p[2]; }
+
+  function cyl(radius, angle, z) {
+    return [radius * Math.cos(angle), radius * Math.sin(angle), z];
+  }
+
+  function faceNormal(q) {
+    const a = [q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]];
+    const b = [q[2][0] - q[1][0], q[2][1] - q[1][1], q[2][2] - q[1][2]];
+    return normalize([
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0]
+    ]);
+  }
+
+  function shade(rgb, n) {
+    const lambert = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]);
+    const k = 0.52 + 0.48 * lambert;
+    return 'rgb(' + Math.round(rgb[0] * k) + ',' + Math.round(rgb[1] * k) + ',' +
+           Math.round(rgb[2] * k) + ')';
+  }
+
+  // the viewer direction of the isometric camera: +x +y +z comes toward us
+  const VIEW = normalize([1, 1, 1]);
+  function facesViewer(n) { return n[0] * VIEW[0] + n[1] * VIEW[1] + n[2] * VIEW[2] > 0.001; }
+
+  // ------------------------------------------------------------- scene build
+  function buildScene(bob) {
+    const items = [];
+    const step = (Math.PI * 2) / (SECTIONS * SUBDIV);
+
+    for (let s = 0; s < SECTIONS; s++) {
+      const base = s % 2 === 0 ? GREEN : BROWN;
+      for (let k = 0; k < SUBDIV; k++) {
+        const a0 = (s * SUBDIV + k) * step;
+        const a1 = a0 + step;
+
+        pushQuad(items, [
+          cyl(R_IN, a0, THICK + bob), cyl(R_OUT, a0, THICK + bob),
+          cyl(R_OUT, a1, THICK + bob), cyl(R_IN, a1, THICK + bob)
+        ], base);
+
+        pushQuad(items, [
+          cyl(R_OUT, a0, THICK + bob), cyl(R_OUT, a0, bob),
+          cyl(R_OUT, a1, bob), cyl(R_OUT, a1, THICK + bob)
+        ], ROCK);
+
+        pushQuad(items, [
+          cyl(R_IN, a0, THICK + bob), cyl(R_IN, a1, THICK + bob),
+          cyl(R_IN, a1, bob), cyl(R_IN, a0, bob)
+        ], ROCK_DARK);
+      }
+    }
+
+    for (let ring = 0; ring < 2; ring++) {
+      const outer = ring === 0;
+      const radius = outer ? R_OUT : R_IN;
+      const height = outer ? H_OUT : H_IN;
+      const offset = outer ? 0 : Math.PI / SECTIONS;
+
+      for (let i = 0; i < BALLOONS_PER_RING; i++) {
+        const a = offset + (i / BALLOONS_PER_RING) * Math.PI * 2;
+        const anchor = cyl(radius, a, THICK + bob);
+        const center = cyl(radius, a, THICK + height + bob);
+        items.push({
+          kind: 'balloon',
+          depth: depth(center),
+          center: center,
+          anchor: anchor,
+          color: BALLOON_COLORS[(i + (outer ? 0 : 3)) % BALLOON_COLORS.length]
+        });
+      }
+    }
+
+    items.sort(function (a, b) { return a.depth - b.depth; });
+    return items;
+  }
+
+  function pushQuad(items, quad, rgb) {
+    const n = faceNormal(quad);
+    if (!facesViewer(n)) return;
+    let d = 0;
+    for (let i = 0; i < quad.length; i++) d += depth(quad[i]);
+    items.push({ kind: 'quad', depth: d / quad.length, quad: quad, fill: shade(rgb, n) });
+  }
+
+  // --------------------------------------------------------------- rendering
+  // world extents, in unscaled screen units, used to fit the drawing on screen
+  const FIT = (function () {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    const probe = function (p, pad) {
+      const s = iso(p);
+      minX = Math.min(minX, s.x - pad); maxX = Math.max(maxX, s.x + pad);
+      minY = Math.min(minY, s.y - pad); maxY = Math.max(maxY, s.y + pad);
+    };
+    for (let i = 0; i < 360; i++) {
+      const a = (i / 360) * Math.PI * 2;
+      probe(cyl(R_OUT, a, 0), 0);
+      probe(cyl(R_OUT, a, THICK + H_OUT), BALLOON_R * 1.9);
+      probe(cyl(R_IN, a, THICK + H_IN), BALLOON_R * 1.9);
+    }
+    return { w: maxX - minX, h: maxY - minY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+  })();
+
+  let scale = 1, originX = 0, originY = 0;
+
+  function project(p) {
+    const s = iso(p);
+    return { x: originX + (s.x - FIT.cx) * scale, y: originY + (s.y - FIT.cy) * scale };
+  }
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = window.innerWidth, h = window.innerHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    scale = Math.min(w / (FIT.w * 1.06), h / (FIT.h * 1.06));
+    originX = w / 2;
+    originY = h / 2;
+  }
+
+  function drawSky(w, h) {
+    const sky = ctx.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, '#4d9ed6');
+    sky.addColorStop(0.55, '#9fd0ee');
+    sky.addColorStop(1, '#dff0f7');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    const clouds = [
+      [0.12, 0.18, 1.0], [0.78, 0.12, 0.75], [0.88, 0.62, 1.15],
+      [0.20, 0.78, 0.9], [0.52, 0.06, 0.6]
+    ];
+    for (let i = 0; i < clouds.length; i++) {
+      const c = clouds[i];
+      puff(c[0] * w, c[1] * h, 46 * c[2] * Math.min(1, w / 900));
+    }
+  }
+
+  function puff(x, y, r) {
+    ctx.beginPath();
+    ctx.ellipse(x, y, r * 1.5, r * 0.6, 0, 0, Math.PI * 2);
+    ctx.ellipse(x - r * 0.7, y + r * 0.15, r * 0.75, r * 0.45, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + r * 0.6, y + r * 0.2, r * 0.85, r * 0.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + r * 0.1, y - r * 0.35, r * 0.8, r * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawQuad(item) {
+    const q = item.quad;
+    ctx.beginPath();
+    const p0 = project(q[0]);
+    ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < q.length; i++) {
+      const p = project(q[i]);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = item.fill;
+    ctx.fill();
+    // hairline of the same colour hides the seams between adjacent quads
+    ctx.strokeStyle = item.fill;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  function envelopePath(c, r) {
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y + r * 1.5);
+    ctx.bezierCurveTo(c.x - r * 0.72, c.y + r * 0.8, c.x - r, c.y + r * 0.22, c.x - r, c.y - r * 0.1);
+    ctx.bezierCurveTo(c.x - r, c.y - r * 1.15, c.x + r, c.y - r * 1.15, c.x + r, c.y - r * 0.1);
+    ctx.bezierCurveTo(c.x + r, c.y + r * 0.22, c.x + r * 0.72, c.y + r * 0.8, c.x, c.y + r * 1.5);
+    ctx.closePath();
+  }
+
+  function drawBalloon(item) {
+    const c = project(item.center);
+    const anchor = project(item.anchor);
+    const r = BALLOON_R * scale;
+    const rgb = item.color;
+    const body = 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
+    const light = 'rgb(' + Math.min(255, rgb[0] + 70) + ',' + Math.min(255, rgb[1] + 70) +
+                  ',' + Math.min(255, rgb[2] + 70) + ')';
+
+    const basketY = c.y + r * 1.5 + r * 0.5;
+    const basketW = r * 0.46;
+    const basketH = r * 0.36;
+
+    // tethers down to the platform rim
+    ctx.strokeStyle = 'rgba(60,50,40,0.8)';
+    ctx.lineWidth = Math.max(1, r * 0.045);
+    ctx.beginPath();
+    ctx.moveTo(c.x - basketW * 0.5, basketY + basketH);
+    ctx.lineTo(anchor.x - r * 0.18, anchor.y);
+    ctx.moveTo(c.x + basketW * 0.5, basketY + basketH);
+    ctx.lineTo(anchor.x + r * 0.18, anchor.y);
+    ctx.stroke();
+
+    // suspension ropes
+    ctx.beginPath();
+    ctx.moveTo(c.x - r * 0.22, c.y + r * 1.3);
+    ctx.lineTo(c.x - basketW * 0.5, basketY);
+    ctx.moveTo(c.x + r * 0.22, c.y + r * 1.3);
+    ctx.lineTo(c.x + basketW * 0.5, basketY);
+    ctx.stroke();
+
+    // basket
+    ctx.beginPath();
+    ctx.moveTo(c.x - basketW * 0.56, basketY);
+    ctx.lineTo(c.x + basketW * 0.56, basketY);
+    ctx.lineTo(c.x + basketW * 0.44, basketY + basketH);
+    ctx.lineTo(c.x - basketW * 0.44, basketY + basketH);
+    ctx.closePath();
+    ctx.fillStyle = '#9a6b38';
+    ctx.fill();
+    ctx.strokeStyle = '#6d4a24';
+    ctx.stroke();
+
+    // envelope
+    ctx.save();
+    envelopePath(c, r);
+    ctx.fillStyle = body;
+    ctx.fill();
+    ctx.clip();
+
+    // gores
+    ctx.fillStyle = light;
+    for (let k = -2; k <= 2; k += 2) {
+      ctx.beginPath();
+      ctx.ellipse(c.x + k * r * 0.42, c.y, r * 0.15, r * 1.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // soft top-left highlight and bottom shadow
+    const g = ctx.createRadialGradient(c.x - r * 0.4, c.y - r * 0.55, r * 0.1,
+                                       c.x, c.y, r * 1.7);
+    g.addColorStop(0, 'rgba(255,255,255,0.45)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0)');
+    g.addColorStop(1, 'rgba(0,0,0,0.38)');
+    ctx.fillStyle = g;
+    ctx.fillRect(c.x - r * 1.2, c.y - r * 1.6, r * 2.4, r * 3.4);
+    ctx.restore();
+
+    envelopePath(c, r);
+    ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+    ctx.lineWidth = Math.max(1, r * 0.04);
+    ctx.stroke();
+  }
+
+  // -------------------------------------------------------------- main loop
+  function frame(now) {
+    const w = window.innerWidth, h = window.innerHeight;
+    const bob = Math.sin(now / 1600) * 7;
+
+    drawSky(w, h);
+
+    const items = buildScene(bob);
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].kind === 'quad') drawQuad(items[i]);
+      else drawBalloon(items[i]);
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
