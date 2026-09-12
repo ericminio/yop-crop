@@ -46,6 +46,16 @@
   .row .v { color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .v.hi { color: var(--amber); } .v.ok { color: var(--green); } .v.no { color: var(--red); }
 
+  .strip-ttl { pointer-events: auto; cursor: pointer; user-select: none;
+    -webkit-user-select: none; display: flex; align-items: center; gap: 6px;
+    color: var(--cyan); opacity: 0.8; font-size: 9px; letter-spacing: 0.16em;
+    text-transform: uppercase; }
+  .strip-ttl:hover { opacity: 1; }
+  .strip-ttl .chev { transition: transform 0.14s ease; }
+  .collapsed > .strip-ttl .chev, .collapsed .strip-ttl .chev { transform: rotate(-90deg); }
+  #top.collapsed .cell, #tl.collapsed #tlcanvas, #tl.collapsed .lg { display: none; }
+  #top .tab { position: absolute; right: 0; top: 100%; padding: 3px 10px;
+    background: rgba(6,17,27,0.72); border: 1px solid var(--edge); border-top: 0; }
   #top { position: absolute; top: 0; left: 0; right: 0; display: flex; gap: 1px;
     background: rgba(6,17,27,0.72); border-bottom: 1px solid var(--edge);
     backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px); }
@@ -112,6 +122,7 @@
   .cand .sc { font-size: 14px; font-variant-numeric: tabular-nums; }
   .cand .dt { font-size: 9px; color: var(--dim); margin-top: 1px; }
 
+  #tl.collapsed { height: 26px; }
   #tl { position: absolute; left: 0; right: 0; bottom: 0; height: 178px;
     background: rgba(6,17,27,0.74); border-top: 1px solid var(--edge);
     backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px); pointer-events: auto; }
@@ -173,9 +184,20 @@
         &middot; sun <span id="elev">—</span>° &middot; DLI <span id="dli">—</span></div>
     </div>
     <div class="cell spacer"></div>
+    <div class="tab strip-ttl" id="toptoggle"><span class="chev">▾</span>readouts</div>
   </div>
 
   <div class="col" id="colL">
+    <div class="panel" id="water">
+      <div class="ttl"><span class="lhs"><span class="chev">▾</span>Water</span><b>irrigation</b></div>
+      <div class="body">
+        <div class="row"><span class="k">carried</span><span class="v" id="wres">—</span></div>
+        <div class="row"><span class="k">deck draw</span><span class="v" id="wdraw">—</span></div>
+        <div class="row"><span class="k">reference ET</span><span class="v" id="et">—</span></div>
+        <div class="row"><span class="k">capture 24 h</span><span class="v" id="wcap">—</span></div>
+        <div class="row"><span class="k">days to dry</span><span class="v" id="wdays">—</span></div>
+      </div>
+    </div>
     <div class="panel" id="systems">
       <div class="ttl"><span class="lhs"><span class="chev">▾</span>Lift &amp; structure</span><b id="lifttag">—</b></div>
       <div class="body">
@@ -187,16 +209,6 @@
         <div class="row"><span class="k">burn rate</span><span class="v" id="burn">—</span></div>
         <div class="row"><span class="k">tether spread</span><span class="v" id="teth">—</span></div>
         <div class="row"><span class="k">deck tilt</span><span class="v" id="tilt">—</span></div>
-      </div>
-    </div>
-    <div class="panel" id="water">
-      <div class="ttl"><span class="lhs"><span class="chev">▾</span>Water</span><b>irrigation</b></div>
-      <div class="body">
-        <div class="row"><span class="k">carried</span><span class="v" id="wres">—</span></div>
-        <div class="row"><span class="k">deck draw</span><span class="v" id="wdraw">—</span></div>
-        <div class="row"><span class="k">reference ET</span><span class="v" id="et">—</span></div>
-        <div class="row"><span class="k">capture 24 h</span><span class="v" id="wcap">—</span></div>
-        <div class="row"><span class="k">days to dry</span><span class="v" id="wdays">—</span></div>
       </div>
     </div>
   </div>
@@ -220,7 +232,7 @@
 
   <div id="tl">
     <div id="tlhead">
-      <span>Crop cycles &middot; 140-day window</span>
+      <span class="strip-ttl" id="tltoggle"><span class="chev">▾</span>Crop cycles &middot; 140-day window</span>
       <span class="lg">
         <span><i style="background:#3f6f8c"></i>establish</span>
         <span><i style="background:#3f9c6b"></i>vegetative</span>
@@ -431,7 +443,10 @@
     const dpr = window.devicePixelRatio || 1, w = window.innerWidth, h = window.innerHeight;
     canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
-    const topPad = 84, botPad = h > 700 ? 192 : 160;
+    const topEl = document.getElementById('top'), tlEl = document.getElementById('tl');
+    const topPad = (topEl && topEl.classList.contains('collapsed')) ? 26 : 84;
+    const botPad = (tlEl && tlEl.classList.contains('collapsed'))
+                   ? 34 : (h > 700 ? 192 : 160);
     const usable = Math.max(160, h - topPad - botPad);
     scale = Math.min(w/(FIT.w*1.06), usable/(FIT.h*1.02));
     originX = w/2; originY = topPad + usable/2;
@@ -697,9 +712,17 @@
     return Math.max(0, 96 - d*13);
   }
 
-  // panels collapse on their title
+  // every panel collapses on its own title, the top strip and timeline included
   document.querySelectorAll('.panel .ttl').forEach(function (t) {
     t.addEventListener('click', function () { t.parentNode.classList.toggle('collapsed'); });
+  });
+  [['toptoggle','top'],['tltoggle','tl']].forEach(function (pair) {
+    const btn = document.getElementById(pair[0]), box = document.getElementById(pair[1]);
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      box.classList.toggle('collapsed');
+      resize();                       // the sky the scene gets just changed
+    });
   });
 
   function updateHUD(st, markDay) {
