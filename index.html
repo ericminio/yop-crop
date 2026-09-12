@@ -39,10 +39,7 @@
   const ROCK = [108, 88, 72];
   const ROCK_DARK = [84, 68, 56];
 
-  const BALLOON_COLORS = [
-    [214, 72, 72], [232, 152, 48], [72, 156, 190],
-    [226, 196, 74], [148, 96, 178], [90, 176, 122]
-  ];
+  const BALLOON_COLOR = [226, 196, 74];
 
   const LIGHT = normalize([-0.55, -0.30, 0.95]);
 
@@ -128,7 +125,7 @@
           depth: depth(center),
           center: center,
           anchor: anchor,
-          color: BALLOON_COLORS[(i + (outer ? 0 : 3)) % BALLOON_COLORS.length]
+          color: BALLOON_COLOR
         });
       }
     }
