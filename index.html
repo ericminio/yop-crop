@@ -90,9 +90,36 @@
     gap: 12px; overflow-y: auto; overflow-x: hidden; pointer-events: auto;
     scrollbar-width: none; }
   .col::-webkit-scrollbar { display: none; }
-  #colL { left: 14px; width: 226px; }
+  #colL { left: 14px; --colw: 226px; --mapw: 440px; width: var(--colw); }
+  #colL.wide { width: var(--mapw); }
+  #colL > .panel { width: var(--colw); }
+  #colL > #position { width: 100%; flex: 1 1 auto; min-height: 168px;
+    display: flex; flex-direction: column; }
+  #colL > #position.collapsed { flex: 0 0 auto; min-height: 0; }
+  #position .body { flex: 1 1 auto; min-height: 0; display: flex;
+    flex-direction: column; }
   #colR { right: 14px; width: 300px; }
   .col > .panel { flex: 0 0 auto; }
+
+  /* world map. Expanded it is wider than the column and sits over the
+     vehicle, which is what it is for: the scene is scenery, this is the fix. */
+  .mapwrap { position: relative; flex: 1 1 auto; min-height: 0; }
+  #mapcanvas { display: block; width: 100%; height: 100%; cursor: grab;
+    background: #051119; border: 1px solid rgba(111,224,255,0.18); }
+  .mapwrap.grabbing #mapcanvas { cursor: grabbing; }
+  .mapctl { position: absolute; top: 7px; right: 7px; display: flex;
+    flex-direction: column; gap: 4px; }
+  .mapctl button { width: 21px; height: 21px; padding: 0; font: inherit;
+    font-size: 13px; line-height: 1; cursor: pointer; color: var(--cyan);
+    background: rgba(6,17,27,0.82); border: 1px solid var(--edge); }
+  .mapctl button:hover { background: rgba(111,224,255,0.16); }
+  .mapctl button:disabled { opacity: 0.3; cursor: default;
+    background: rgba(6,17,27,0.82); }
+  #recentre { position: absolute; right: 7px; bottom: 7px; padding: 2px 8px;
+    font: inherit; font-size: 8.5px; letter-spacing: 0.14em; cursor: pointer;
+    text-transform: uppercase; color: var(--amber); background: rgba(6,17,27,0.82);
+    border: 1px solid var(--amber); visibility: hidden; }
+  #recentre:hover { background: rgba(255,200,97,0.15); }
 
   /* crop needs blocks */
   .crop { padding: 6px 0 7px; border-bottom: 1px solid rgba(111,224,255,0.09); }
@@ -141,7 +168,8 @@
   #sim { position: absolute; bottom: 186px; left: 14px; font-size: 8.5px;
     letter-spacing: 0.14em; color: var(--dim); text-transform: uppercase; opacity: 0.75; }
 
-  @media (max-width: 1120px) { #colL { width: 198px; } #colR { width: 268px; } }
+  @media (max-width: 1120px) { #colL { --colw: 198px; --mapw: 372px; }
+    #colR { width: 268px; } }
   @media (max-width: 940px) { #colL { display: none; } #top .cell.opt { display: none; } }
   @media (max-width: 640px) { #colR { left: 14px; right: 14px; width: auto; }
     #tl { height: 150px; } #tlcanvas { height: 116px; } }
@@ -209,6 +237,20 @@
         <div class="row"><span class="k">burn rate</span><span class="v" id="burn">—</span></div>
         <div class="row"><span class="k">tether spread</span><span class="v" id="teth">—</span></div>
         <div class="row"><span class="k">deck tilt</span><span class="v" id="tilt">—</span></div>
+      </div>
+    </div>
+    <div class="panel" id="position">
+      <div class="ttl"><span class="lhs"><span class="chev">&#9662;</span>Position</span>
+        <b id="maptag">&mdash;</b></div>
+      <div class="body">
+        <div class="mapwrap">
+          <canvas id="mapcanvas"></canvas>
+          <div class="mapctl">
+            <button id="zoomin" title="zoom in">+</button>
+            <button id="zoomout" title="zoom out">&minus;</button>
+          </div>
+          <button id="recentre">centre on FF1</button>
+        </div>
       </div>
     </div>
   </div>
@@ -486,6 +528,7 @@
     scale = Math.min(w/(FIT.w*1.04), usable/FIT.h);
     originX = w/2; originY = topPad + usable/2;
     sizeTimeline();
+    sizeMap();
   }
 
   function skyStops(e) {
@@ -682,6 +725,375 @@
   });
 
   // ==========================================================================
+  // world map: where FF1 is. Coastlines are Natural Earth 110m land, simplified
+  // to 0.2 deg and quantised to 0.02, delta-encoded as zigzag varints in a
+  // 64-character alphabet so the page stays a single file with no fetches.
+  // Weather layers (temperature, wind, cloud, humidity) go in drawMap, over
+  // the ocean fill and under the coastline: see LAYERS below.
+  // ==========================================================================
+  const LAND_DATA = [
+    'l6Fj6H5B-CvNIzFiC4NNgEuCmDpB|vxPt4H-FNjIoD+BmB6FPwFhCctB|jtE7zH8DrB6B5EpWjDvLmBSqBqJ8BqH+EoGU2ET|56L1lH6',
+    'HC3E7BtHqBWiB2DR|roMzlH4EnBjKqBoCWkDX|p1J5gH8GB6B3BpOC5E8BuKD|91G39GMrBrBtClHfhECwBmBlHZrCcFqByFyB0DDiBq',
+    'F4BuB8CQ0FvG|vyR3oI+C6B0FfkEkB8ErB2EwBkJSmJjC+bxCgJc6UxBgR4BUwBrWazCoBrIW8C6DTqBtM+C6OKyEhBmNkDjBqBzI4Bh',
+    'SexIoDdyDqEpBkKYyCrB+EKsQ8CnBqCekBgES8BhBuc8DwwBR+GuB+DVkH0BkFjDoDeyLrCsIYoNjB0BqBxDmC-DI5BkB3BwDmOdyE-B',
+    'mEFmMuBsHP2CsCwCrBwHHyCnB0LlB2DqC4MzC4WgDiDUyCsCrEoHgD2DQmBf0CwBsBqNgHmQoE8BXlBhB5N9C9BjC0BnChFdvFrDPlB4',
+    'CnC+E1BsE1EuDzHL1BxDpClENpDjC-Q-CvCpB3UHgBlBmKvCpNvBJvCqIrD+wBzG0EzCua2E4VjBqGoCmmBmDvDmCAmBzSTbmBOqCuBW',
+    '2JuBuKiDiU6BuPiD2F+BeoBpDWmDqC6JqCoGyDgJrB4BsC8HzBwLYsBpBqU2DyE4BqCXoDMiExCkI2CkEFmBjByCkBsKO8GPwD-BkOYq',
+    'PwC8F0DkHpCoDIwE9BsK2DmOkD+CL8E+BwFWSkB2CcyIqB2FPuHhEsIjCgDFoF+BiP1BwC-DLtBtF9BMnBwDCvD1DgGnB0DS8I8G6LqB',
+    '0EyDuLwDuMGoCayBiC0CpC2CRiOCgFZqMO4JoFuKpE2MYwKyCoGxCoN3ByKuCuRb0S2BgB8C+Bb8C3D0CRkZEmCdTlBgCd8GvBuLxByD',
+    'BgCiB+HxCsHVwHhD8RZmM1C-FjG9JnC5FrDjCtCFxC8DvD6FNoBrBrQnBlGxFoMxEoQ9CyBvBgJV+ClB0IamHfz-iBX|3zGnoFuI1CrB',
+    'xB-CDxBiB1DnCtDMtJkDvHmFkL7D0CyD8CqBmCL4C3D|92F1-EwCrBdjBnEdrBkB1CtBxBuB4D6B0CX+BoB|07Gp7E5EHU0D+ErBX-B|',
+    'smOv-DgDhBgGaI1DrBzDjBclClCxCKjEuHCuBiCJ|28Q7-DWpBoCqBcpBArB5E-EmBvBhFlBzClF-DpCpIqBPkB0BqC+DkD+GsDwE4EO',
+    '4BmCuBWpB|2hR-wDoCnDCkCsBbQrCwCfwFS3BxErCCPpClDrEtCnB5BoB4ByCf4BrDoBEkBoCiBMuEtG+IkBGkEvCe5C|oqQnlClBX9D',
+    'oCvE+EiDjByGpF|utRl2BiBbP1B1DAJsBoBiBmCE|vyR3zBgjjBX-BVLmByCaxijBkBT1B|mqQ1uBSvC9BiBDuCwBf|u8ErqBgB1GRdh',
+    'B6BRbK1DrIlZpFhCnE+BtCkJwDmGpBqIwB4D8FsBqE2DeyBNsBsBL6CuF2C3E|0gO-qBkBtCgCkByCvCKhE6CrI2HvELXgDpFoBWoBrB',
+    'YQSpDkGzFcxCD1DuBzCvB5I-BjFnCvBrEnIftF5BjBvDBlG7DvE+BQ0BtE5CpJuC-B+BpB+DxBoB-CMgByBXqCvBlC5CRsDiFHqCvE3D',
+    'nBtCtCoBE2BzDuDUWnJwDlQnC-FpC3B7C3LJ7FrDrEE-EyCC6BkCkBDkFzBmDLyDpFuKsBpBhB8CwCjCzCgGqCmIIrCqBkCwGyDoCD2F',
+    'uCgFcqE0EI+CmC2CqB1CqBUjBuBgBwBsBTMsCiEkEsBJCY8CciEnD+DLV4B+CqDPasB4B8BkBoEGB0BpCgB2BQmJvD4DmBuBxBhC9ChB',
+    'BMnB5B-D4OvIiCkByCoHRmE+BqImBmBcxBoCnFE7C|06P3gBchBlCAlB+BwCb|o5L-fvFkC+CU4C9BFZ|22P7ejDIP4B0D-B|o5P-dPR',
+    '9CyEiBAsC-D|8kM1fhDJ0BgDuD+BiHahHjD-BpC|uwLpZiDRYpBtHhBiB6B4BCaiB|igMpZN3B7IPAmBwCU+Bd8EsB|qsP9W-BQjB6Bk',
+    'DpC|uzKlVgGJWqB6FvBkBhC2ER6D7BxDlBtDqBlQ6B1FoBRsB7CGmCgD4DF6DtBOjB|glNtTxBjCJsCmBmCWtC|knPpVnCc-BsE2ErEN',
+    'b|+6OjRtFzC-F6BIewEFeyBK1B4BI0CmCJ8BwCPjBzD|0tM5KjBhBlCUTqBmDGYhB|43M1JkBrCzCqBxGEY4BqHZ|y+OhOfZpBiDtFoD',
+    'cYiEpCuCpCMzB|mjNzDc-EoD7B0CqDyD8B4CAyT3G8DlDQ5BmF9Ba1B9CJYhC4ChCiCpD4BCDrB6EtCJb1IsBnE4DzB4ChEsBxE9BOpC',
+    'vChB9EU5CyClDUXb9DDqByC+BcpCgGzI+C1E8CjC5BVwCtCyB0FiBHaxEAnB8B5CSpByB6F4BgFnBQlB|snMuEvCjDrCR9KANrC6C3C2',
+    'BsB6FiBHtBrBOrB5B3ClBgD-DRjB4CxDAhC1BdlBkBwByChDnBZcOoBnC6BIiDjCfOhI-BPrBee8CPgDpBCfkCgEwK0CqCsGpB0DEiDo',
+    'CSV|kyMyDD3CzBKP9BqBzBbLlCgGUuCiBmBG3B8BHInB|2qKpSvDBzGmFrK4NhCkFhK8JHyB6GX8J5JmDB6GlGnBxC+CjByB9DqCHwB-',
+    'Bb3I|swL2FwD7C1DLhBjCE5C-CjCpB9HNkBxDrBnB8B3DmB3DjBjBwBzEGPmE-CyDD0F8BiCqChBsCUU0CkFoB0L+LoBA6B9C0E5BHlB',
+    'hCFSvBpChB3B5CoC-CPtB|+qMqaQ7DhB5CjBmDvBzBgBpCbtB1D6BboCewB-BwB3E9CPeoB0C0DiCkBtBsCcQsBoCCFuCwCvBQ1C|69H',
+    'sT3CXtBwCRwEsBiFmC3B+CtFNnDpBb|t+F0flDDckC6BOQtC|ujMkgBhD9D9BmC4B0D4BGPjCqCiDJ-C|qyLkdjE-CqHsJQvC1D7D|88',
+    'LmlB8DfBpBtDnCLyE|moMgmBcvDrCca-CvBVDmCdGP8B8BHBmB9BsCgDBclB|47L6oBZ1C9C+D2CDiBjB|k7L65B+BbeacpEZzC7BfGh',
+    'FiDC+D3BM7DzDmDXlB-B8BtEImBiCdYNjBvB6BTqEoBfsB2H8BA|-sG+4BXXlEDFsBgDOkCd|pwH63BdPxD0B2Be6CLmCzBlCB|5iHk+',
+    'BmIXShB4BCDd+CnBlBpB9DW3BXPYnCxCdsBjCS5ER1BeIgBoFVkBWrByC-BQWc+BD|64Ks6B1CvBxCeD2CyBuBmFaWlBhClD|hmP07Bn',
+    'BBI4DqDrCpCpB|-4HknCoBjB+CM2FjE8CRHb2EtBtCjB3IFkC4BpDgB5B2C1J8BhBSkBahDE-DrC7CB4D4C4EoBiIpB|pyHoqCXF9B4C',
+    'U+BgBBiBtE|26LonCrBzC-BgFsEuFuBdtC7G|zwHkzCRnC9B0DwCrB|4kN2qDMhB3B7BnBgBzBXZ5BhCcCwB2B8B6BLoBqBqCV|isDwv',
+    'DjCrBKZlDnBnC0BoH6B|iqCyvD2BhBsGFLdvEH3DkBSqB|wwBw3DpBhFpIkDMyBoJM|6c4gE6BlCNjE1CblBcZyFqDY|y4Ni0DlBvCSx',
+    'BzBlC-DvBvFFtExDjCmBDsC5MnCmDpChCnFhCpBvBmBY6C9BepBkCgDeiH4FmGesDVoDyFiCvBsGsEgC6DRwDqBgCqDS4BpEDxC7CjDC',
+    'nD|8d4jEhBtCrBUXkC2CsCQ1C|2hOiqEoCVmCqBWvDzEb3ChD7EkC3BtDtDBNkDyBuCqDE6B6GiGpE|9mGuxEkFJ1CvB9DsBZgBmBgBk',
+    'BxB|jhGu5ExFe9CwBmFRqD7B|9hMy3EzBLjFsBnEkDnDSduCkIvBiHzF|tvFs+EhC1CiCgBiCThBjBqHhBdnCmCQsBxDpB3CvDOWyCbO',
+    'zD3C7BEmCuB-CarJDPe+BkBrBa0C8BoDgF0E8CwBFpC5C|1+M8oFgDIfxD4CvCnBAzE8DLqCwBL|8gOy+EmDvFzEgB9BvEiDlDDlCrC8',
+    'B-BtCTiJcyG5BiDIoE8CuBlBuBsBOiDpL|lVqjFxF7BtEQyCoDzBmDyG+D0CEsD9B1BlCQlCpC5C|0nB4tF5BvCpD4BNqB0EiBezB|j+',
+    'OwyFjDlBzBaPuBwEyBkCFqBd1CvB|rJo3FrDrD0GMZvC5C5CoDHgD-DkCP6C3E6DTL-BzBdoBxB5C1BtJZvBUhCvB7CMlClB1BUyEqD6',
+    'CU7ESboBoDe1B2BSiC0EJQ6BlCgC3DSXakBsBfc1BtBFgDzByBmBoDuCyCoGA|tlQo7F9BP9DuByFIKlB|13HoiGnBzBlCmBsBkBiCV|',
+    '9-HgkGzD3B9CesCuBmET|14QqnGyJvB1CfxDoB3CFRuB|jqImtGSrB0BQ6I7CIvBqCIoChB5Cd5EY3BsBxHnDhB6BnEJ2CyBwBqFoCH|',
+    'ptB2vGXhCyDjChErC3L1C5MuBiDsB5GyByFSDexGYiCgC4EO8EhC4E2B+DbkF0BmFF|htH6xGvDDZwBqB4B8COuCZJ5B-Bd|vyRw3G8P',
+    'vFJ9BkCXXoCwINkG9CjDrBhFJDhDnBTtJiCVsB3GE1BiBWmB3DXsBvB3BpBgljBAhErB-DGiGhFNjC5FWvL1CpJjEjBtBvEmCjIvCtBm',
+    'B-CpBlEMf-B3DhDEnByDVNxE9CDpBzCqBpBvFzBhBxD1EXblDvE7CnE0NwBqE0C8BGwB6EWgLkH0FwCwCuE5DJ7BxC9HtDxC8DhIhB5H',
+    'nFyC9B5LjBIoC7EQ7DxBxJSnKdjWvN+ELyB9BgDVgCyBuDHwEtDEzCtCjD1B3I3F1GvKhJjE5B-BB9BwBnHlEdhBEnC3GvDP1BiD7BuD',
+    '3FAxDjB3BlIlCIiErBoDqCSjC0CxBUnBb3BsByB4BK6CpDkB-JlD0BuBToBuCiCzB0BnGnD9B-BhDFxBtB0BjCyCPEtBuCbwDmC6EnBQ',
+    'zBtEbhGvFqD1BoFpIArC-BZY1B8BdpBhF3BH1HnLzIvFxDL7BrBjBgB3BvB1HhChBpD3BFZoCYoBlEgBzFlDzC9CVlCqFrH4EtEuB5FN',
+    'vFzMxJjBgCckCpC4BzCQ7C6E5CuBzCBOwC3CBHtD1CpHGnCiCD6BxF6H9FqBhCMtGqC1EnCH1G6E1DgILyD9EgGP5BT2B+B2JhB8BIsD',
+    'nB0B9CoKxF3D3DgBkB8DV+CtCyDMkB5BOnCyC9CwG7CEV-C7DWNjB-FTGrC1B5BvEjC9I1HAtB7FhCdrCa1GpB9CApFzBFtBrCef5Cbp',
+    'ChD9C+C1CwH3CwEpB8F5CqE7C4QvE7BnCMhE4DwBmBdmB9FuDpD0EnPhB5MiCpB6DvBSxFhC-JqErEkH1BP-BiBlBnB5BGyClHoEhDDr',
+    'CkC1DW8D6BTV1DqB7B8GKsHkHEzEsBjC8FjCsD7DjE9FhCRLhEtDjBflClDXCpBhJzCVtChI5C5ClCxJlC9B7B3EF3CiIUEN4ErFuIxD',
+    '2ChCgDHgE3BuDlD8B1BkEzF2HxBAcwEjD5FtCuCnCwEoFzLgF9GRxCmEtD+BxK+C9B0CvG2M-KDpB3BXsEhEyBAqU+EHpE9E-LrFhI1D',
+    'nE1K-H7ElGjE5ChCvFnBhBnBzFgCjBZjFiEjHepMjEpGtG1ClI7GHnC2C-EJpG-I-EiBxBnC9HtMxMzHzD-JInJ-CpEgDf8DgBUBsCrJ',
+    'oO-CyP1H2MBiHoCiHyD2EEiEvC+EkB8BjEgL3JoMkDkNnBiCtBQrB4CjIzB9EqG1HN9LtErIsB-IxCzEyB1KyHzB2BduDlEkEZiC7DgC',
+    '1BiCJuE5CwDsBUoC6DgBkGNoGtC6CI4CoCwCcoD6CwCgCuFiCkB0DuE+CK0G0FZ8D0BqEgCkCuF4CiDkFqCA8BpB0HRqLwEiMM+CmB4G',
+    'PsDqBoCLDzB0CmBITxBvBAvBiBXN1C-BxBS3B0BB+B9B4L3CwB3CwKvDiDoCXuCgBwBsE8BoETiBrBoFdYhBmECyHnC2D+B4CImCNcvB',
+    'YgB+EduC6BwE2JO2DjBuBmBmBvEOlC5B1ELxC2BrDEXpBjCL-C2BtDBjE6EwBuC9BwBuDgD6EEqBsC+FNuH+CkFC+JtDsGI2D0BOqBXk',
+    'C9OkIoCQ0C0C3BoByEoBBW-MhDG9B4ETThB1HrC3BUWwBrDcwD2BbW7EaFkB9CLvD5EtCLb5D3CvDsB-C2CfRX1DF9DzCdiCxDM3DZkC',
+    '3BxBP3BAzB0BTVqCpDlBVoDrCC3B7CaczB9BJmB3ChCAxCqB3ByErFkGOyEhC4B9I6DzCqCUIvBsC-BQdrBdiBcuBvCOxCjBFtCgBxB+',
+    'CzB0BxCuDvCuCAYVbTkIpERhB3BuB3CQnB-BoClBLzBpBF1B1CpBHqBqDjCsDzFyD3E0B9E8DfiDhEsBtH7DjGcxEfF1D9CjC-DTtDpF',
+    'mB5B3BrBVhCrCTlCrC9GAlDpCvBKhC6CtHHGsEjCwBsCqGV4FpBqBuEoCgTf0B8BSoGvF6E5EoBJoCiEWoFZfyDgDrBoHuCeyC6GkC4C',
+    '0EwH8BmDRkCyBjC2EBmDsB6BsG+BfzCiCrB-DhDe3CkDXAjB+EwBgFnC+KuDsGrBWsBqEgBPgFwBgC+CiBwCrCwCCeoEjBL-BkBH4B8H',
+    'sB0GNyD2BnDwBpQhC5E4CWiDvB6CwB8BiMgGJqBrEuBrFb-ClCO7B-KnFnCrEmF9D7CvDnDXlBnF3B9C5DK3BvCzDD-F+KhC+BlGzDjE',
+    'XrEyBhC0K8CgCoI0CkGmDoNuK6NoG8GsBkFF4E0CqLO6JnChEbuD9BoDiBkF7ByIX6LvDsCvBGhCtD1BjFZ9NsCpCLkFpCMzEwG3BMwB',
+    '9BsBiCkByH9B0CYjCqCqHiD6FpB6BmCzC8BwB8BnC+B4IhB4B3B9DLA1BuCjB8EWYgCuRmEsCFjD7B8DJoCiB8FC0EqByD7ByDiCpD6B',
+    '2BiBmJf2PvEiC0BnDqC3DKgBuB3BuD4F8CiC6CqCUoIZW3B-CxCgCfgBjCXpEuD9BpBhCjGtEyDN2E8BayB4CwB7B4BwBiCtDKX2BwCm',
+    'DhEwCyFkCVoCyBC0B3BnB-CsDRtBoCoFmBwGG4F5B3C0CLqD4TevC0ByDiC+RiCiBa4KLgH0B4FB8D2CsHqBqFfnEZiHNcxBgMYyJ3CZ',
+    'zB-NxDwInB6CUyB-BsGqBiKRYtBiNNGsC0LRiFzBuB-B7BpB+DtC8EpBiDqDgFtBqFciGfqCckFNpC+CkEqBoc-B2C7BkIrC8SCyCnBJ',
+    'pC6DbyVOuF3C8DgBxCgCuBsBuQVgJvBzgjBrB|u5EghE0BlCuCfxCHjBxDjBViB7DkFlCuER8EaGoGtCgBamChCGW0C+CX4CgBlD0DvC',
+    'ZJnCfmFzDiBnDyEiDHEoCsFCAgF3FSxG-BtB7B-CPjDnD8C9CJjCgFpF|7qJ+3G-BhB-KgC+EqCiInD|vyRw-GgljBjCtDFRgB-gjBqB',
+    '|vyRw-GyHZxHpBAkC|96Im5GAlDkEuC4D-BdpCiDjCwF+EGuDiJVmExBGxBpCzBmC1BLvBjGlCrEPlDe7ExFzDjCvEFtCpBFhC1DL5Dx',
+    'CrDvDlBtCF1DyEP8CpFsEUsSlGyIPP1CgBjDoCvD0E-CuCiB2BmDzB+ElC0BgFwBoFsEHiCjC2C5DqC2DqDrC2HmCYyIlByCa2HhEyFH',
+    'gBxG6CPoC5ByE2BiF+E+JxKnB9BgHxD+G5BoBzC2DxBIxDvEnClFjB9DxC7TBzClC-DtBhI-G0CQgFkEyG0C2EK4CxB9ChCgC3FiExBm',
+    'FOkDwDGnCiCjB7NlFvDnCrCID0CuF0CvIPShB7JvD3B-BNlCgB1BqBBJkBeVHb1LlCwFApGRdbeFVnCnCrC9B4BuBtD3C1DWoCzBmBLy',
+    'CEpD-BQiCf6BrH-BrCtIhEjHtGCrE+D7JfnFvCA1BiCxDqGUkCZ2B1DkDlDtB-DsC1IHpBNmB3C9CRnCCpC2B9GEzItErC7CW3E3B9ER',
+    '3FmCzF4CjEoBxBqDZqBpBuH4B+D6ByBsFiK2BWlCtC3DSPnB5DtBYFjG3BhCwCT6JgB8EnCY-C-BhKiFxGsCV6F0CyIhD0DwCU2D6BuB',
+    '0EOmF6D+BfV5B5BLehDrB5BmBtCsBGWoCjBuD8DqBNuBkBgBkBlCmCBkC3CmGImE3B4B4B0HIzCdiBvBwCFqCxBSvCyBCqD7B+BhCCxB',
+    'kE1C+JVsDjB6D7DiBEwClH2BPElCrCxCgBdwFPEjDsCiCkJhDwB5BP3B0DgBiG1B2EE0IhGiFfkBfyB7FlBlFjL1M5B-OxBtFlDhEPnD',
+    'xCpBV9BpIlBrJ3E1CjDlB3IlC1BvDvF7E9D5E3GxD3B-DK-EoB7B4BH1BgEzCNlC+BrBDvB-C-D1E1B1JJU5F7BhBlDNhDkBlBZOjDkC',
+    'd2BgBezBrF9ClB5E9CAvCzBbpCiDpCgDThB5C1D3BhCzDjE3CgBnDiC5BhEGpE7BP9C7EetHgEhCmLqBgDqDuC3Ee+C4CiBmFwDjB0Bw',
+    'GhCaf7D-BOiCoKuBkCjByGqBEsF2OV2EeyCN8D8B6DwCwTFkFVuEjD4BHqBlOwIpByCQc9K6T1EqDiBuBvB+CiFwGTsBlBtB7BsBC2Dk',
+    'BQwBmF8D+BNgBmBGU2CwBIyCyDlBYCmIpCyCT2BYa9CkCrBF7CzCwB3B3CfR8BtBLToBtDUBVhCkBN+BlEmDNzB1BmBAyCbOWShG2FiB',
+    'IPgBjDNzIsCzGqFjE6B7F1BpN4EtDqC9EmBnGkFXyBiBKO4CtCoErHwH1CoBD2CjJ8H7C+GpCmB5CYKjFyJ9KgDrHwBDsC5C7B1Bb+B7',
+    'FiELgEzIqFyBCoByCnEkDxF8K5DiDxG6BL4BhDkDvCiF3D2DNwC1B4BSoFfsCgC0IRmE7BkEMUwEhB2B9CYaxBkF1IuE1FqB3B4CQ8Bh',
+    'EsBPwC5DoCB0BtEmCb2ChEyC1B+C9HKjKkEvI2BpEH7J4CtDTUlCxLxCN6BuBiDqDgBbYzK-FqCxB-CnCtGnCZrB7EzBftB5T-EPS6Jk',
+    'E8DK8I8EkCoEzDdfQ1BjBhC0BZjBlByB-EnBIgD-BiBhER3EmCB6BrCqB8EkF2EHwCwB0EWRuB3BSqCmBlGrB7GKxEYnFkDqL6CyCALx',
+    'ByGEzLgGnEgB4B0ByFE+DuBWwBoDwB6LwB6E2B4EVoCrB0GODX4ERmSrBmESkW9DwGoC2EL4JmCmCpBqCYWuBuHjDmEkCOrCgFuB4DFk',
+    'MtCsHLmExBrExB0FVkLeqD7BsDyBlDsBiCiBqGO0FtCwDIwFtBuJOL+B4CS8EhBA9CgCwCwCDsBkD-GmDIwD4DoCoH7BoEvD3CxB6FT|',
+    '3kLwkHxBtB+GeqExByDyB8CfwChD0BoBnCoD8FBwDnB+CnF8KhDLrBjFHgClBhBjB-KqB-W-B1BuB-GQ7DwCsPoBjRS1BkBoHoBnKa6E',
+    'yDsI+BmDT|xmKulH3ChC7EmCoFSsCV|xuHukHIbhKHrE8BEkBwBGmHJsF3B|vuI0kHuC9B8CwC+HqBsFnDPhCmJmCoLjDMpB6FWoD-Bo',
+    'KvCgD9C3FtBqM3CwE7C8EFdlCvFzD3IqEhELL3B6IjEiChDjBnC3LqDmIzFlPiD5DwBkBcnJkDCd-IP1CkBiCoCqMQhBkBkFyEZsB-F0',
+    'CpGiBgCYpD+BnFoBpHpBhXkCzCiBqDuBtEAfmDsC4CoDqBiIapC-B|z5J4mHqJHad9CtB4ErBR5CjId9JyDCgBsGLtDiC2DwB|4gO6kH',
+    '1LO8GyB6E-B|njJujHpDrCxDE-B4CCyB4EmCuMbzE5C3DR|t4Lk-GnIxBzBsBlH0BmG2FhD+ByKOuMZsGlCxL-C7DlCApB|i3O0qHzDn',
+    'B5KyBYgB2NpB|xkJqqH1BlBpIgB2BuBuEa8DhC|slOksHtCpC1QTlGgC2BkCiEUyT5B|5zJ4vHsCtBpB9DjFJrDQC6BjFHFuC2MmB|ly',
+    'KkuHoBjBiGMSvB9BvBlX7BNgBwGsBvSGqEiD+Cc6TjDvE+C8CmBmDLiBvB|6zFg9GhMEZsB1FcN2BmDUD4BmG0C7COwH2CZuBqR2D4P4',
+    'BiGMmCnB3W-D1J-CxJ-FUzCgGxC|7nJ+wHuDfmGA2CfXlB0FtBmZKqDlBWpBxGvBrTDrNsBtBoDlDsBhKsBmBoBuGF|jrL0yHNrCrCjB',
+    '3N9BnEW4LsEiJM|nlJoyHnHEbcqGB6Bd|p4K6yH7FdzEiBkHqBsEPfd|otCqzH9GpBxFYmCa7BgBuGUoBlBwEV|12K01H-IToDuB4FZ|',
+    'vrJ+zHzEVvCYzBwC0JtBbjB|14J40HmBpBlRwBgDe3DYHmB0OxBsCvB|soK20HzRlB2FkEyCKqK9BdpB|i5Bi5HoKpC7HnB3BpC1CRvB',
+    'zC3DD3G+B6CkB3KwDtCwCyIkB2BjBuECmBiB0EE+DjB|wvCo7HkGhBzE1BhJLlJQRcvECtDuB2JcwEXmDe8HZ|6-E27HjL1BrDY6BgB-',
+    'GE8KSUZ4EoB0EVlBP|q4Jw2HvPQlFmBtCoCnEU8O8CoNzEX5C|9vI+4H4DfhKpDvFFvGMrDqBCkBwCa3FArFuCqEqCmDIrBWoHGgE1Bs',
+    'KnBwChC|h2G2jIiPT2FbDZ-R1C6GAtM3CrFxC7RvBoELjCRyCxBzNhEOXqFEEXrI7B9beLwB6FWxBoCoKjBnEgChFUiI+BciBrEoBrB0',
+    'BiLP8EkB-RGvFiBnGmCViBgTsCoHhBsC2B4Jc4hBD|10CglIyTvC5FlBlbfiLMuJjBiGgByCjBrD5BkXsCqJT6BpBvO-C-JPmHFjGnEC',
+    'vD4DhC-JjB4FzBY1CpDHgE1C9GH0DnBfjB3IP8DjCCrBlGqBzBZqI3CmBvCxFRnGgDiBjCzD1ByMH7QnFzMhBxHvE3GlC5KzBzC9BBlC',
+    'xBhCjFvCoBtC-CzFrEFzEyCnGAxK0IxBiCN6CpE8CkBqChCiBiD2D2EmB8B2DhI-B5DiBHiCoB2BqJXlIgD3FMwD8CjI2G-DmBCqBrI6',
+    'BzWDhJ+CwOmBtUiCOoBqXgDmBkBtIkB4CoBqPwCnBsBgRsByJAuDfoI4BsStCtH2BOqBwK8B+KDgEkBiLK+YL'
+  ].join('');
+  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-';
+
+  const LAND = (function () {
+    const idx = {};
+    for (let i = 0; i < B64.length; i++) idx[B64.charAt(i)] = i;
+    return LAND_DATA.split('|').map(function (str) {
+      const p = [];
+      let i = 0, qx = 0, qy = 0, wrap = 0, prev = null;
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      while (i < str.length) {
+        const d = [0, 0];
+        for (let k = 0; k < 2; k++) {
+          let n = 0, sh = 0, c;
+          do { c = idx[str.charAt(i++)]; n |= (c & 31) << sh; sh += 5; } while (c & 32);
+          d[k] = (n & 1) ? -((n + 1) >> 1) : (n >> 1);
+        }
+        qx += d[0]; qy += d[1];
+        const lat = qy / 50;
+        let lon = qx / 50;
+        // Eurasia, Antarctica, Fiji and Wrangel are all stitched across the
+        // antimeridian. Left wrapped, each one draws a band clean across the
+        // map, so unroll the longitudes and repeat the ring every 360 instead.
+        if (prev !== null) {
+          const step = lon - prev;
+          if (step > 180) wrap -= 360; else if (step < -180) wrap += 360;
+        }
+        prev = lon; lon += wrap;
+        x0 = Math.min(x0, lon); x1 = Math.max(x1, lon);
+        y0 = Math.min(y0, lat); y1 = Math.max(y1, lat);
+        p.push(lon, lat);
+      }
+      return { p: p, x0: x0, x1: x1, y0: y0, y1: y1 };
+    });
+  })();
+
+  const mapc = document.getElementById('mapcanvas');
+  const mctx = mapc.getContext('2d');
+  const mapWrap = mapc.parentNode;
+  const zoomIn = document.getElementById('zoomin');
+  const zoomOut = document.getElementById('zoomout');
+  const recentre = document.getElementById('recentre');
+  const mapTag = document.getElementById('maptag');
+  const colL = document.getElementById('colL');
+  const posPanel = document.getElementById('position');
+
+  const ZOOMS = [1, 2, 4, 8, 16, 32, 64];
+  const SCALES = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+  const map = { zi: 0, lon: null, lat: null };   // lon/lat null = locked on FF1
+  let view = null;                               // last drawn frame, read by the drag
+  let mapDirty = true, mapDrawn = 0;
+
+  // The map takes the height the column has left over, so its box moves
+  // whenever a neighbouring panel collapses or the chrome is re-measured.
+  // Check the box against the bitmap every frame rather than trusting a
+  // one-shot resize: sized once at startup it came out 12 px stale and blurred.
+  function sizeMap() {
+    const dpr = window.devicePixelRatio || 1, r = mapc.getBoundingClientRect();
+    const w = Math.max(1, Math.round(r.width * dpr));
+    const h = Math.max(1, Math.round(r.height * dpr));
+    if (w === mapc.width && h === mapc.height) return;
+    mapc.width = w; mapc.height = h;
+    mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    mapDirty = true;
+  }
+
+  function syncMapWidth() {
+    colL.classList.toggle('wide', !posPanel.classList.contains('collapsed'));
+    sizeMap();
+  }
+
+  function syncMapCtl() {
+    mapTag.textContent = ZOOMS[map.zi] + '\u00d7';
+    zoomIn.disabled = map.zi >= ZOOMS.length - 1;
+    zoomOut.disabled = map.zi <= 0;
+    recentre.style.visibility = map.lon === null ? 'hidden' : 'visible';
+  }
+
+  function setZoom(i) {
+    const n = Math.max(0, Math.min(ZOOMS.length - 1, i));
+    if (n === map.zi) return;
+    // zooming out of a pan should not strand the view: once the whole world
+    // fits again there is nowhere to be but centred
+    map.zi = n;
+    if (n === 0) { map.lon = null; map.lat = null; }
+    mapDirty = true; syncMapCtl();
+  }
+
+  // every label on the map lands on coastline sooner or later, so carry a halo
+  function mapLabel(text, x, y, fill) {
+    mctx.strokeStyle = 'rgba(5,17,25,0.9)';
+    mctx.lineWidth = 2.5; mctx.lineJoin = 'round';
+    mctx.strokeText(text, x, y);
+    mctx.fillStyle = fill; mctx.fillText(text, x, y);
+    mctx.lineWidth = 1;
+  }
+
+  function drawMap() {
+    const r = mapc.getBoundingClientRect(), W = r.width, H = r.height;
+    if (W < 2 || H < 2) return;
+    const z = ZOOMS[map.zi], ppd = W / (360 / z), halfLat = H / 2 / ppd;
+    const cLon = map.lon === null ? sim.lon : map.lon;
+    let cLat = map.lat === null ? sim.lat : map.lat;
+    cLat = halfLat >= 90 ? 0
+         : Math.max(-90 + halfLat, Math.min(90 - halfLat, cLat));
+    const X = function (lon) { return W / 2 + (lon - cLon) * ppd; };
+    const Y = function (lat) { return H / 2 - (lat - cLat) * ppd; };
+    view = { cLon: cLon, cLat: cLat, ppd: ppd };
+
+    mctx.clearRect(0, 0, W, H);
+    mctx.fillStyle = '#051119'; mctx.fillRect(0, 0, W, H);
+    const yN = Y(90), yS = Y(-90);
+    mctx.fillStyle = '#08202f';
+    mctx.fillRect(0, Math.max(0, yN), W, Math.min(H, yS) - Math.max(0, yN));
+
+    // --- LAYERS: weather goes here, between the ocean and the coastline ----
+
+    const step = z <= 1 ? 30 : z <= 4 ? 15 : z <= 16 ? 5 : 1;
+    mctx.lineWidth = 1;
+    mctx.font = '8px ui-monospace, Menlo, monospace';
+    mctx.strokeStyle = 'rgba(111,224,255,0.10)';
+    mctx.beginPath();
+    for (let lat = -90 + step; lat < 90; lat += step) {
+      const y = Y(lat); if (y < 0 || y > H) continue;
+      mctx.moveTo(0, y); mctx.lineTo(W, y);
+    }
+    const lon0 = Math.ceil((cLon - 180 / z) / step) * step;
+    for (let lon = lon0; lon <= cLon + 180 / z; lon += step) {
+      const x = X(lon); mctx.moveTo(x, 0); mctx.lineTo(x, H);
+    }
+    mctx.stroke();
+
+    mctx.beginPath();
+    for (let k = -1; k <= 1; k++) {
+      const shift = k * 360;
+      for (let i = 0; i < LAND.length; i++) {
+        const ring = LAND[i];
+        if (X(ring.x1 + shift) < -2 || X(ring.x0 + shift) > W + 2) continue;
+        if (Y(ring.y1) > H + 2 || Y(ring.y0) < -2) continue;
+        const p = ring.p;
+        mctx.moveTo(X(p[0] + shift), Y(p[1]));
+        for (let j = 2; j < p.length; j += 2) mctx.lineTo(X(p[j] + shift), Y(p[j + 1]));
+        mctx.closePath();
+      }
+    }
+    mctx.fillStyle = '#24455b'; mctx.fill('evenodd');
+    mctx.strokeStyle = 'rgba(111,224,255,0.40)'; mctx.stroke();
+
+    // the equator, and the band FF1 flies to stay inside
+    const yEq = Y(0);
+    if (yEq > 0 && yEq < H) {
+      mctx.strokeStyle = 'rgba(111,224,255,0.22)';
+      mctx.setLineDash([4, 4]); mctx.beginPath();
+      mctx.moveTo(0, yEq); mctx.lineTo(W, yEq); mctx.stroke();
+      mctx.setLineDash([]);
+    }
+
+    // graticule labels, along the left and bottom edges
+    const GRID = 'rgba(151,188,206,0.85)';
+    mctx.textBaseline = 'middle'; mctx.textAlign = 'left';
+    for (let lat = -90 + step; lat < 90; lat += step) {
+      const y = Y(lat); if (y < 9 || y > H - 28) continue;
+      mapLabel(Math.abs(lat) + (lat === 0 ? '' : lat > 0 ? 'N' : 'S'), 3, y - 5, GRID);
+    }
+    mctx.textAlign = 'center'; mctx.textBaseline = 'bottom';
+    for (let lon = lon0; lon <= cLon + 180 / z; lon += step) {
+      const x = X(lon), w = ((lon + 180) % 360 + 360) % 360 - 180;
+      if (x < 14 || x > W - 14) continue;
+      mapLabel(Math.abs(w) + (w === 0 ? '' : w > 0 ? 'E' : 'W'), x, H - 3, GRID);
+    }
+
+    // FF1, at whichever wrap of its longitude the view is looking at
+    let mlon = sim.lon;
+    while (mlon - cLon > 180) mlon -= 360;
+    while (mlon - cLon < -180) mlon += 360;
+    const mx = X(mlon), my = Y(sim.lat);
+    mctx.strokeStyle = 'rgba(255,200,97,0.30)';
+    mctx.beginPath();
+    mctx.moveTo(0, my); mctx.lineTo(mx - 11, my); mctx.moveTo(mx + 11, my); mctx.lineTo(W, my);
+    mctx.moveTo(mx, 0); mctx.lineTo(mx, my - 11); mctx.moveTo(mx, my + 11); mctx.lineTo(mx, H);
+    mctx.stroke();
+    // where the wind is taking it, scaled by drift
+    const br = sim.hdg * D, arm = 12 + sim.drift * 0.9;
+    const ax = mx + Math.sin(br) * arm, ay = my - Math.cos(br) * arm;
+    mctx.strokeStyle = 'rgba(111,224,255,0.85)'; mctx.lineWidth = 1.4;
+    mctx.beginPath(); mctx.moveTo(mx, my); mctx.lineTo(ax, ay); mctx.stroke();
+    mctx.fillStyle = 'rgba(111,224,255,0.85)';
+    mctx.beginPath();
+    mctx.moveTo(ax + Math.sin(br) * 5, ay - Math.cos(br) * 5);
+    mctx.lineTo(ax + Math.sin(br + 2.4) * 5, ay - Math.cos(br + 2.4) * 5);
+    mctx.lineTo(ax + Math.sin(br - 2.4) * 5, ay - Math.cos(br - 2.4) * 5);
+    mctx.closePath(); mctx.fill();
+    mctx.lineWidth = 1;
+    mctx.strokeStyle = '#ffc861';
+    mctx.beginPath(); mctx.arc(mx, my, 7, 0, Math.PI * 2); mctx.stroke();
+    mctx.fillStyle = '#ffc861';
+    mctx.beginPath(); mctx.arc(mx, my, 2.6, 0, Math.PI * 2); mctx.fill();
+    mctx.textAlign = 'left'; mctx.textBaseline = 'top';
+    mapLabel('FF1', mx + 10, my + 6, '#ffc861');
+
+    // scale bar, true at the latitude in the middle of the view
+    const kmpp = 111.32 * Math.cos(cLat * D) / ppd;
+    let km = SCALES[0];
+    for (let i = 0; i < SCALES.length; i++) if (SCALES[i] / kmpp < W * 0.32) km = SCALES[i];
+    const bar = km / kmpp, bx = 8, by = H - 19;
+    mctx.strokeStyle = 'rgba(215,242,255,0.7)';
+    mctx.beginPath();
+    mctx.moveTo(bx, by - 3); mctx.lineTo(bx, by); mctx.lineTo(bx + bar, by);
+    mctx.lineTo(bx + bar, by - 3); mctx.stroke();
+    mctx.textBaseline = 'bottom';
+    mapLabel(km + ' km', bx + bar + 5, by + 2, 'rgba(215,242,255,0.8)');
+  }
+
+  function maybeDrawMap(t) {
+    if (posPanel.classList.contains('collapsed')) return;
+    sizeMap();
+    if (!mapDirty && t - mapDrawn < 500) return;
+    drawMap(); mapDirty = false; mapDrawn = t;
+  }
+
+  let mapDrag = null;
+  function mapGrab(e) {
+    if (mapDirty) { drawMap(); mapDirty = false; }   // never drag on a stale view
+    if (!view) return;
+    const t = e.touches ? e.touches[0] : e;
+    mapDrag = { x: t.clientX, y: t.clientY, lon: view.cLon, lat: view.cLat };
+    mapWrap.classList.add('grabbing');
+    e.preventDefault();
+  }
+  function mapMove(e) {
+    if (!mapDrag || !view) return;
+    const t = e.touches ? e.touches[0] : e;
+    const lon = mapDrag.lon - (t.clientX - mapDrag.x) / view.ppd;
+    map.lon = ((lon + 180) % 360 + 360) % 360 - 180;
+    map.lat = mapDrag.lat + (t.clientY - mapDrag.y) / view.ppd;
+    mapDirty = true; syncMapCtl(); e.preventDefault();
+  }
+  function mapRelease() { mapDrag = null; mapWrap.classList.remove('grabbing'); }
+
+  mapc.addEventListener('mousedown', mapGrab);
+  window.addEventListener('mousemove', mapMove);
+  window.addEventListener('mouseup', mapRelease);
+  mapc.addEventListener('touchstart', mapGrab, { passive: false });
+  window.addEventListener('touchmove', mapMove, { passive: false });
+  window.addEventListener('touchend', mapRelease);
+  mapc.addEventListener('wheel', function (e) {
+    e.preventDefault(); setZoom(map.zi + (e.deltaY < 0 ? 1 : -1));
+  }, { passive: false });
+  zoomIn.addEventListener('click', function () { setZoom(map.zi + 1); });
+  zoomOut.addEventListener('click', function () { setZoom(map.zi - 1); });
+  recentre.addEventListener('click', function () {
+    map.lon = null; map.lat = null; mapDirty = true; syncMapCtl();
+  });
+
+  // ==========================================================================
   // HUD
   // ==========================================================================
   const el = {};
@@ -749,7 +1161,10 @@
 
   // every panel collapses on its own title, the top strip and timeline included
   document.querySelectorAll('.panel .ttl').forEach(function (t) {
-    t.addEventListener('click', function () { t.parentNode.classList.toggle('collapsed'); });
+    t.addEventListener('click', function () {
+      t.parentNode.classList.toggle('collapsed');
+      syncMapWidth();               // the map panel is wider than its column
+    });
   });
   [['toptoggle','top'],['tltoggle','tl']].forEach(function (pair) {
     const btn = document.getElementById(pair[0]), box = document.getElementById(pair[1]);
@@ -903,10 +1318,12 @@
     }
     updateHUD(st, markDay);
     drawTimeline(st, markDay);
+    maybeDrawMap(now);
     requestAnimationFrame(frame);
   }
 
   buildRows();
+  syncMapWidth(); syncMapCtl();
   window.addEventListener('resize', resize);
   resize();
   requestAnimationFrame(frame);
