@@ -24,7 +24,12 @@
   const R_OUT = 280;            // outer radius of the donut
   const R_IN = 140;             // hole radius
   const THICK = 44;             // slab thickness
-  const BALLOONS_PER_RING = 12; // 12 outside + 12 inside = 24
+  // 16 outside + 8 inside = 24. The inner rim has half the circumference, so an
+  // even split would crowd it; these counts give both rings the same clearance
+  // between envelopes and put the larger share of the lift under the heavier,
+  // tip-resisting outer half of the deck.
+  const BALLOONS_OUT = 16;
+  const BALLOONS_IN = 8;
   const BALLOON_R = 34;
   const H_OUT = 155;            // balloon height above the outer rim
   const H_IN = 215;             // balloon height above the inner rim
@@ -110,10 +115,12 @@
       const outer = ring === 0;
       const radius = outer ? R_OUT : R_IN;
       const height = outer ? H_OUT : H_IN;
-      const offset = outer ? 0 : Math.PI / SECTIONS;
+      const count = outer ? BALLOONS_OUT : BALLOONS_IN;
+      // stagger the inner ring so no balloon sits on an outer one's radius
+      const offset = outer ? 0 : Math.PI / BALLOONS_OUT;
 
-      for (let i = 0; i < BALLOONS_PER_RING; i++) {
-        const a = offset + (i / BALLOONS_PER_RING) * Math.PI * 2;
+      for (let i = 0; i < count; i++) {
+        const a = offset + (i / count) * Math.PI * 2;
         const anchor = cyl(radius, a, THICK + bob);
         const center = cyl(radius, a, THICK + height + bob);
         items.push({
