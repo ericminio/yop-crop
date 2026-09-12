@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FF1 — Flying Farm Operations</title>
+<style>
+  :root {
+    --ink: #d7f2ff;
+    --dim: #7aa3b8;
+    --cyan: #6fe0ff;
+    --amber: #ffc861;
+    --green: #7bea9a;
+    --red: #ff7a6e;
+    --panel: rgba(6, 17, 27, 0.62);
+    --edge: rgba(111, 224, 255, 0.22);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0a1622; }
+  body {
+    font: 11px/1.35 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  #scene { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+
+  /* faint scanlines over the whole view */
+  #grain {
+    position: fixed; inset: 0; pointer-events: none; z-index: 5; opacity: 0.5;
+    background: repeating-linear-gradient(
+      to bottom, rgba(0,0,0,0.045) 0 1px, transparent 1px 3px);
+  }
+
+  #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+
+  .panel {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    backdrop-filter: blur(9px) saturate(1.2);
+    -webkit-backdrop-filter: blur(9px) saturate(1.2);
+    padding: 9px 11px 10px;
+  }
+  .panel::before, .panel::after {
+    content: ''; position: absolute; width: 9px; height: 9px;
+    border: 1px solid var(--cyan); opacity: 0.75;
+  }
+  .panel::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+  .panel::after  { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+
+  .ttl {
+    font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--cyan); opacity: 0.8; margin-bottom: 7px;
+    display: flex; justify-content: space-between; gap: 10px;
+  }
+  .ttl b { font-weight: 400; color: var(--dim); letter-spacing: 0.08em; }
+
+  .row { display: flex; justify-content: space-between; gap: 10px; padding: 1.5px 0; }
+  .row .k { color: var(--dim); letter-spacing: 0.05em; }
+  .row .v { color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .v.hi { color: var(--amber); }
+  .v.ok { color: var(--green); }
+  .v.no { color: var(--red); }
+
+  /* ---------------------------------------------------------------- top bar */
+  #top {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; align-items: stretch; gap: 1px;
+    background: rgba(6,17,27,0.72);
+    border-bottom: 1px solid var(--edge);
+    backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+  }
+  #top .cell { padding: 7px 13px; border-right: 1px solid rgba(111,224,255,0.12); }
+  #top .cell:last-child { border-right: 0; }
+  #top .lab {
+    font-size: 8.5px; letter-spacing: 0.18em; color: var(--dim);
+    text-transform: uppercase; margin-bottom: 3px;
+  }
+  #top .big { font-size: 17px; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  #top .sub { font-size: 9.5px; color: var(--dim); margin-top: 2px; }
+  #ident .big { color: var(--cyan); letter-spacing: 0.06em; }
+  #top .spacer { flex: 1; border-right: 0; }
+
+  .chip {
+    display: inline-block; padding: 1px 6px; border: 1px solid currentColor;
+    font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  }
+
+  /* temperature band gauge */
+  .gauge { width: 150px; height: 7px; position: relative; margin-top: 5px;
+           background: rgba(255,255,255,0.07); border: 1px solid rgba(111,224,255,0.18); }
+  .gauge .band { position: absolute; top: 0; bottom: 0; background: rgba(123,234,154,0.32);
+                 border-left: 1px solid var(--green); border-right: 1px solid var(--green); }
+  .gauge .needle { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--amber);
+                   box-shadow: 0 0 7px var(--amber); }
+  .gauge .sc { position: absolute; top: 9px; font-size: 8px; color: var(--dim); }
+
+  /* daylight strip */
+  .daystrip { width: 190px; height: 9px; position: relative; margin-top: 5px;
+              background: linear-gradient(to right, #0c1c2b, #17334a 12%, #86c6ee 30%,
+                          #cfe9f8 50%, #86c6ee 70%, #17334a 88%, #0c1c2b);
+              border: 1px solid rgba(111,224,255,0.18); }
+  .daystrip .mk { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--ink); opacity: 0.55; }
+  .daystrip .now { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--amber);
+                   box-shadow: 0 0 7px var(--amber); }
+
+  /* ------------------------------------------------------------ side panels */
+  .col {
+    position: absolute; top: 92px; bottom: 186px;
+    display: flex; flex-direction: column; gap: 12px;
+    overflow-y: auto; overflow-x: hidden;
+    pointer-events: auto; scrollbar-width: none;
+  }
+  .col::-webkit-scrollbar { display: none; }
+  #colL { left: 14px; width: 226px; }
+  #colR { right: 14px; width: 262px; }
+  .col > .panel { flex: 0 0 auto; }
+
+  .croprow { display: grid; grid-template-columns: 9px 1fr auto; gap: 7px;
+             align-items: center; padding: 3px 0;
+             border-bottom: 1px solid rgba(111,224,255,0.07); }
+  .croprow:last-child { border-bottom: 0; }
+  .sw { width: 9px; height: 9px; }
+  .cname { letter-spacing: 0.05em; }
+  .cphase { font-size: 8.5px; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
+  .cdays { text-align: right; font-variant-numeric: tabular-nums; }
+  .cdays b { font-weight: 600; font-size: 13px; }
+  .cdays i { font-style: normal; font-size: 8.5px; color: var(--dim); }
+  .bar { height: 2px; background: rgba(255,255,255,0.1); margin-top: 3px; }
+  .bar > i { display: block; height: 100%; background: currentColor; }
+
+  .cand { padding: 5px 0; border-bottom: 1px solid rgba(111,224,255,0.07); }
+  .cand:last-child { border-bottom: 0; }
+  .cand .hd { display: flex; justify-content: space-between; align-items: baseline; }
+  .cand .nm { letter-spacing: 0.06em; }
+  .cand .sc { font-size: 14px; font-variant-numeric: tabular-nums; }
+  .cand .dt { font-size: 9px; color: var(--dim); margin-top: 1px; }
+
+  /* --------------------------------------------------------------- timeline */
+  #tl {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 178px;
+    background: rgba(6,17,27,0.74); border-top: 1px solid var(--edge);
+    backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+  }
+  #tlhead {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 14px 3px; font-size: 9px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--cyan); opacity: 0.85;
+  }
+  #tlhead .lg { display: flex; gap: 12px; color: var(--dim); letter-spacing: 0.08em; }
+  #tlhead .lg span { display: flex; align-items: center; gap: 4px; }
+  #tlhead .lg i { width: 13px; height: 6px; display: block; }
+  #tlcanvas { display: block; width: 100%; height: 142px; }
+
+  #sim {
+    position: absolute; bottom: 186px; left: 14px;
+    font-size: 8.5px; letter-spacing: 0.14em; color: var(--dim);
+    text-transform: uppercase; opacity: 0.75;
+  }
+
+  /* Shed panels by priority, least decision-critical first. Relocation and the
+     harvest countdown are why this display exists, so they go last. */
+  @media (max-width: 1080px) { #colL { width: 198px; } #colR { width: 234px; } }
+  @media (max-width: 900px)  { #colL { display: none; } #top .cell.opt { display: none; } }
+  @media (max-width: 620px)  {
+    #colR { left: 14px; right: 14px; width: auto; }
+    #tl { height: 150px; } #tlcanvas { height: 116px; }
+  }
+  @media (max-height: 620px) { #colR, #colL { bottom: 160px; } }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="grain"></div>
+
+<div id="hud">
+  <div id="top">
+    <div class="cell" id="ident">
+      <div class="lab">Vehicle</div>
+      <div class="big">FF1</div>
+      <div class="sub">flying farm &middot; <span id="status" class="chip" style="color:var(--green)">nominal</span></div>
+    </div>
+    <div class="cell">
+      <div class="lab">Mission clock</div>
+      <div class="big" id="clock">--:--</div>
+      <div class="sub">day <span id="mday">—</span> &middot; <span id="datestr">—</span></div>
+    </div>
+    <div class="cell">
+      <div class="lab">Position</div>
+      <div class="big" id="latlon">—</div>
+      <div class="sub"><span id="alt">—</span> &middot; hdg <span id="hdg">—</span> &middot; <span id="drift">—</span></div>
+    </div>
+    <div class="cell">
+      <div class="lab">Air temperature</div>
+      <div class="big"><span id="temp">—</span><span style="font-size:11px;color:var(--dim)"> °C</span></div>
+      <div class="gauge" title="green band is the 18-20 C crop optimum">
+        <div class="band" id="gband"></div><div class="needle" id="gneedle"></div>
+      </div>
+    </div>
+    <div class="cell opt">
+      <div class="lab">Humidity / wind</div>
+      <div class="big"><span id="rh">—</span><span style="font-size:11px;color:var(--dim)"> %</span></div>
+      <div class="sub"><span id="wind">—</span> &middot; VPD <span id="vpd">—</span> kPa</div>
+    </div>
+    <div class="cell opt">
+      <div class="lab">Daylight</div>
+      <div class="big" id="daylen">—</div>
+      <div class="daystrip">
+        <div class="mk" id="mkrise"></div><div class="mk" id="mkset"></div><div class="now" id="mknow"></div>
+      </div>
+      <div class="sub"><span id="rise">—</span> ↑ &middot; ↓ <span id="set">—</span> &middot; sun <span id="elev">—</span>°</div>
+    </div>
+    <div class="cell spacer"></div>
+  </div>
+
+  <div class="col" id="colL">
+  <div class="panel" id="systems">
+    <div class="ttl"><span>Lift &amp; structure</span><b id="lifttag">—</b></div>
+    <div class="row"><span class="k">all-up mass</span><span class="v" id="mass">—</span></div>
+    <div class="row"><span class="k">gross lift</span><span class="v" id="lift">—</span></div>
+    <div class="row"><span class="k">margin</span><span class="v" id="margin">—</span></div>
+    <div class="row"><span class="k">envelope temp</span><span class="v" id="envt">—</span></div>
+    <div class="row"><span class="k">fuel remaining</span><span class="v" id="fuel">—</span></div>
+    <div class="row"><span class="k">burn rate</span><span class="v" id="burn">—</span></div>
+    <div class="row"><span class="k">tether spread</span><span class="v" id="teth">—</span></div>
+    <div class="row"><span class="k">deck tilt</span><span class="v" id="tilt">—</span></div>
+  </div>
+
+  <div class="panel" id="water">
+    <div class="ttl"><span>Water</span><b>irrigation</b></div>
+    <div class="row"><span class="k">reserve</span><span class="v" id="wres">—</span></div>
+    <div class="row"><span class="k">today's ET</span><span class="v" id="et">—</span></div>
+    <div class="row"><span class="k">drawn today</span><span class="v" id="wdrawn">—</span></div>
+    <div class="row"><span class="k">capture 24 h</span><span class="v" id="wcap">—</span></div>
+    <div class="row"><span class="k">days to dry</span><span class="v" id="wdays">—</span></div>
+  </div>
+  </div>
+
+  <div class="col" id="colR">
+  <div class="panel" id="crops">
+    <div class="ttl"><span>Crops &middot; harvest countdown</span><b>209 m²</b></div>
+    <div id="croplist"></div>
+  </div>
+
+  <div class="panel" id="move">
+    <div class="ttl"><span>Relocation candidates</span><b>forecast</b></div>
+    <div id="candlist"></div>
+  </div>
+  </div>
+
+  <div id="sim">simulated data &middot; no live feed connected</div>
+
+  <div id="tl">
+    <div id="tlhead">
+      <span>Crop cycles &middot; 140-day window</span>
+      <span class="lg">
+        <span><i style="background:#3f6f8c"></i>establish</span>
+        <span><i style="background:#3f9c6b"></i>vegetative</span>
+        <span><i style="background:#b9a63c"></i>bulking</span>
+        <span><i style="background:#c8663c"></i>mature</span>
+        <span><i style="background:#2a3d4d"></i>turnaround</span>
+      </span>
+    </div>
+    <canvas id="tlcanvas"></canvas>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ==========================================================================
+  // FF1 geometry, in metres, from the sizing work: a 4 m wide ring carrying
+  // 209 m2 of bed, lifted by five 60,000 m3 envelopes standing off 40 m so
+  // they do not eclipse the crops. Nobody aboard; drones service it.
+  // ==========================================================================
+  const R_OUT = 10.32, R_IN = 6.32;
+  const BALLOON_R = 24.3, STANDOFF = 40.0, LIFT_H = 60.0, BALLOONS = 5;
+  const SUBDIV = 4;
+  const RING_PHASE = (9 * Math.PI) / 180;
+
+  // area m2, bed depth m, cycle days, colour. Ordered so depth ramps up and
+  // back down across a segment, leaving no step at the segment joins.
+  const CROPS = [
+    { name: 'kale',      area:   6, depth: 0.25, days:  55, rgb: [ 61, 107,  79], off:  12 },
+    { name: 'carrot',    area:   4, depth: 0.35, days:  70, rgb: [217, 139,  58], off:  44 },
+    { name: 'potato',    area: 146, depth: 0.45, days: 100, rgb: [ 95, 141,  62], off:   0 },
+    { name: 'sunflower', area:  40, depth: 0.60, days: 100, rgb: [227, 194,  74], off:  55 },
+    { name: 'tomato',    area:  11, depth: 0.45, days: 110, rgb: [192,  80,  64], off:  28 },
+    { name: 'onion',     area:   2, depth: 0.25, days: 100, rgb: [185, 167, 196], off:  72 }
+  ];
+  const TOTAL_AREA = CROPS.reduce(function (s, c) { return s + c.area; }, 0);
+  const TURNAROUND = 10;
+  const PHASES = [
+    { name: 'establish',  f: 0.15, css: '#3f6f8c' },
+    { name: 'vegetative', f: 0.35, css: '#3f9c6b' },
+    { name: 'bulking',    f: 0.35, css: '#b9a63c' },
+    { name: 'mature',     f: 0.15, css: '#c8663c' }
+  ];
+
+  const ROCK_DARK = [70, 58, 48];
+  const BALLOON_COLOR = [226, 196, 74];
+  const TARGET_LO = 18, TARGET_HI = 20;     // the crop optimum band
+
+  // ==========================================================================
+  // simulated state. Everything below is a model, not a feed.
+  // ==========================================================================
+  const SPEED = 120;                        // 1 real second = 2 simulated minutes
+  const START = Date.UTC(2026, 2, 14, 9, 20);
+  const sim = {
+    t: START,
+    lat: 43.6, lon: -1.4,                   // chasing the 18-20 C band
+    alt: 1180, hdg: 68, drift: 17,
+    fuel: 0.78, water: 0.64
+  };
+
+  const D = Math.PI / 180;
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  // real (simplified) solar geometry: declination, day length, elevation
+  function solar(latDeg, dayOfYear, hours) {
+    const decl = 23.45 * D * Math.sin(2 * Math.PI * (284 + dayOfYear) / 365);
+    const lat = latDeg * D;
+    let cosH = -Math.tan(lat) * Math.tan(decl);
+    cosH = Math.max(-1, Math.min(1, cosH));
+    const H = Math.acos(cosH);
+    const dayLen = (2 * H / Math.PI) * 12;
+    const ha = (hours - 12) * 15 * D;
+    const elev = Math.asin(Math.sin(lat) * Math.sin(decl) +
+                           Math.cos(lat) * Math.cos(decl) * Math.cos(ha)) / D;
+    return { decl: decl / D, dayLen: dayLen, rise: 12 - dayLen / 2,
+             set: 12 + dayLen / 2, elev: elev };
+  }
+
+  function noise(seed, scale) {
+    return (Math.sin(seed * 12.9898) * 43758.5453 % 1) * scale;
+  }
+
+  function readState() {
+    const d = new Date(sim.t);
+    const hours = d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
+    const doy = Math.floor((sim.t - Date.UTC(d.getUTCFullYear(), 0, 0)) / 86400000);
+    const missionDay = Math.floor((sim.t - START) / 86400000);
+    const s = solar(sim.lat, doy, hours);
+
+    // air temperature: diurnal swing about a slowly wandering daily mean,
+    // the platform holding itself near the 18-20 band
+    const mean = 19.1 + Math.sin(missionDay / 11) * 1.15 + noise(missionDay, 0.5);
+    const swing = 3.4 * Math.max(0, Math.sin((hours - 9.2) / 24 * 2 * Math.PI + 0.6));
+    const temp = mean - 1.9 + swing;
+
+    const rh = Math.max(28, Math.min(96, 74 - (temp - 17) * 4.1 + Math.sin(hours / 3.1) * 5));
+    const svp = 0.6108 * Math.exp(17.27 * temp / (temp + 237.3));
+    const vpd = svp * (1 - rh / 100);
+    const et = Math.max(0, 1.05 * vpd * (0.6 + Math.max(0, s.elev) / 60) * 2.2);
+
+    return { d: d, hours: hours, doy: doy, missionDay: missionDay, sun: s,
+             temp: temp, rh: rh, vpd: vpd, et: et };
+  }
+
+  function cropCycle(c, missionDay) {
+    const period = c.days + TURNAROUND;
+    const pos = ((missionDay - c.off) % period + period) % period;
+    if (pos >= c.days) {
+      return { phase: 'turnaround', progress: 1,
+               toHarvest: period - pos + c.days, inGap: true };
+    }
+    let acc = 0, phase = PHASES[0].name;
+    for (let i = 0; i < PHASES.length; i++) {
+      acc += PHASES[i].f * c.days;
+      if (pos < acc) { phase = PHASES[i].name; break; }
+    }
+    return { phase: phase, progress: pos / c.days,
+             toHarvest: Math.ceil(c.days - pos), inGap: false };
+  }
+
+  // ==========================================================================
+  // 3D scene
+  // ==========================================================================
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d');
+
+  function normalize(v) {
+    const m = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / m, v[1] / m, v[2] / m];
+  }
+  const LIGHT = normalize([-0.55, -0.30, 0.95]);
+  const VIEW = normalize([1, 1, 1]);
+  const COS30 = Math.cos(Math.PI / 6);
+
+  function iso(p) { return { x: (p[0] - p[1]) * COS30, y: (p[0] + p[1]) * 0.5 - p[2] }; }
+  function depth(p) { return p[0] + p[1] + p[2]; }
+  function cyl(r, a, z) { return [r * Math.cos(a), r * Math.sin(a), z]; }
+
+  function faceNormal(q) {
+    const a = [q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]];
+    const b = [q[2][0] - q[1][0], q[2][1] - q[1][1], q[2][2] - q[1][2]];
+    return normalize([a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+                      a[0] * b[1] - a[1] * b[0]]);
+  }
+  function facesViewer(n) { return n[0]*VIEW[0] + n[1]*VIEW[1] + n[2]*VIEW[2] > 0.001; }
+  function shade(rgb, n, k0) {
+    const lam = Math.max(0, n[0]*LIGHT[0] + n[1]*LIGHT[1] + n[2]*LIGHT[2]);
+    const k = (0.52 + 0.48 * lam) * k0;
+    return 'rgb(' + Math.round(rgb[0]*k) + ',' + Math.round(rgb[1]*k) + ',' +
+                    Math.round(rgb[2]*k) + ')';
+  }
+
+  // one identical segment per tether: contiguous arcs would put the centre of
+  // mass 0.43 m off axis, since a 60 cm bed weighs 2.4x a 25 cm one per metre
+  const SECTORS = (function () {
+    const out = [];
+    let a = -Math.PI / 2;
+    for (let k = 0; k < BALLOONS; k++) {
+      for (let i = 0; i < CROPS.length; i++) {
+        const span = (CROPS[i].area / BALLOONS / TOTAL_AREA) * Math.PI * 2;
+        out.push({ crop: CROPS[i], a0: a, a1: a + span });
+        a += span;
+      }
+    }
+    return out;
+  })();
+
+  function pushQuad(items, quad, rgb, k0) {
+    const n = faceNormal(quad);
+    if (!facesViewer(n)) return;
+    let d = 0;
+    for (let i = 0; i < quad.length; i++) d += depth(quad[i]);
+    items.push({ kind: 'quad', depth: d / quad.length, quad: quad, fill: shade(rgb, n, k0) });
+  }
+
+  function buildScene(bob, k0) {
+    const items = [];
+    for (let s = 0; s < SECTORS.length; s++) {
+      const sec = SECTORS[s];
+      const zTop = bob, zBot = bob - sec.crop.depth;
+      const steps = Math.max(2, Math.ceil((sec.a1 - sec.a0) / (Math.PI/180) / SUBDIV));
+      const step = (sec.a1 - sec.a0) / steps;
+      for (let k = 0; k < steps; k++) {
+        const a0 = sec.a0 + k * step, a1 = a0 + step;
+        pushQuad(items, [cyl(R_IN,a0,zTop), cyl(R_OUT,a0,zTop),
+                         cyl(R_OUT,a1,zTop), cyl(R_IN,a1,zTop)], sec.crop.rgb, k0);
+        pushQuad(items, [cyl(R_OUT,a0,zTop), cyl(R_OUT,a0,zBot),
+                         cyl(R_OUT,a1,zBot), cyl(R_OUT,a1,zTop)], [92,74,56], k0);
+        pushQuad(items, [cyl(R_IN,a0,zTop), cyl(R_IN,a1,zTop),
+                         cyl(R_IN,a1,zBot), cyl(R_IN,a0,zBot)], ROCK_DARK, k0);
+      }
+      const next = SECTORS[(s + 1) % SECTORS.length];
+      if (next.crop.depth !== sec.crop.depth) {
+        const deeper = next.crop.depth > sec.crop.depth ? next.crop : sec.crop;
+        pushQuad(items, [cyl(R_IN,sec.a1,zTop), cyl(R_OUT,sec.a1,zTop),
+                         cyl(R_OUT,sec.a1,bob-deeper.depth),
+                         cyl(R_IN,sec.a1,bob-deeper.depth)], ROCK_DARK, k0);
+      }
+    }
+    for (let i = 0; i < BALLOONS; i++) {
+      const a = RING_PHASE + (i / BALLOONS) * Math.PI * 2;
+      const centre = cyl(STANDOFF, a, LIFT_H + bob);
+      const fan = [];
+      for (let t = -1; t <= 1; t++) {
+        fan.push(cyl(R_OUT, a + t * (Math.PI / BALLOONS) * 0.62, bob));
+      }
+      items.push({ kind: 'balloon', depth: depth(centre), centre: centre, fan: fan });
+    }
+    const SEG = 96;
+    for (let i = 0; i < SEG; i++) {
+      const p0 = cyl(R_OUT, (i/SEG)*Math.PI*2, bob);
+      const p1 = cyl(R_OUT, ((i+1)/SEG)*Math.PI*2, bob);
+      items.push({ kind: 'cable', depth: (depth(p0)+depth(p1))/2, a: p0, b: p1 });
+    }
+    items.sort(function (a, b) { return a.depth - b.depth; });
+    return items;
+  }
+
+  // An envelope is not symmetric about its centre: the canopy reaches 0.86 r
+  // above it, the basket hangs 1.86 r below. Padding equally, as this did,
+  // invented a band of empty sky above the balloons and pushed FF1 low in the
+  // frame. Bound the drawn extents instead, so centring is true.
+  const FIT = (function () {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    function probe(p, padX, padUp, padDown) {
+      const s = iso(p);
+      minX = Math.min(minX, s.x - padX); maxX = Math.max(maxX, s.x + padX);
+      minY = Math.min(minY, s.y - padUp); maxY = Math.max(maxY, s.y + padDown);
+    }
+    for (let i = 0; i < 360; i++) {
+      const a = (i/360)*Math.PI*2;
+      probe(cyl(R_OUT, a, -0.7), 0, 0, 0);
+      probe(cyl(STANDOFF, a, LIFT_H),
+            BALLOON_R * 1.03, BALLOON_R * 0.90, BALLOON_R * 1.90);
+    }
+    return { w: maxX-minX, h: maxY-minY, cx: (minX+maxX)/2, cy: (minY+maxY)/2 };
+  })();
+
+  let scale = 1, originX = 0, originY = 0;
+  function project(p) {
+    const s = iso(p);
+    return { x: originX + (s.x - FIT.cx) * scale, y: originY + (s.y - FIT.cy) * scale };
+  }
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = window.innerWidth, h = window.innerHeight;
+    canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // leave room for the top bar and the timeline
+    // the sky actually left to us: below the top strip, above the timeline
+    const topPad = 84, botPad = h > 700 ? 192 : 160;
+    const usable = Math.max(160, h - topPad - botPad);
+    scale = Math.min(w / (FIT.w * 1.06), usable / (FIT.h * 1.02));
+    originX = w / 2;
+    originY = topPad + usable / 2;
+    sizeTimeline();
+  }
+
+  // sky keyed to sun elevation, so the view already reads as a weather display
+  function skyStops(elev) {
+    const stops = [
+      { e: -12, a: [10,20,34],  b: [18,32,48],  c: [26,40,56] },
+      { e:  -3, a: [30,46,74],  b: [96,84,104], c: [188,120,96] },
+      { e:   4, a: [58,104,158],b: [176,150,140],c: [240,176,120] },
+      { e:  16, a: [50,132,196],b: [140,190,226],c: [214,226,232] },
+      { e:  70, a: [40,128,206],b: [150,200,236],c: [216,238,247] }
+    ];
+    let lo = stops[0], hi = stops[stops.length-1];
+    for (let i = 0; i < stops.length-1; i++) {
+      if (elev >= stops[i].e && elev <= stops[i+1].e) { lo = stops[i]; hi = stops[i+1]; break; }
+    }
+    if (elev < stops[0].e) { lo = hi = stops[0]; }
+    if (elev > stops[stops.length-1].e) { lo = hi = stops[stops.length-1]; }
+    const t = hi.e === lo.e ? 0 : (elev - lo.e) / (hi.e - lo.e);
+    const mix = function (p, q) {
+      return 'rgb(' + Math.round(p[0]+(q[0]-p[0])*t) + ',' +
+                      Math.round(p[1]+(q[1]-p[1])*t) + ',' +
+                      Math.round(p[2]+(q[2]-p[2])*t) + ')';
+    };
+    return [mix(lo.a,hi.a), mix(lo.b,hi.b), mix(lo.c,hi.c)];
+  }
+
+  function drawSky(w, h, elev) {
+    const s = skyStops(elev);
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, s[0]); g.addColorStop(0.58, s[1]); g.addColorStop(1, s[2]);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    const cloudAlpha = Math.max(0.06, Math.min(0.42, (elev + 8) / 38));
+    ctx.fillStyle = 'rgba(255,255,255,' + cloudAlpha.toFixed(3) + ')';
+    const clouds = [[0.07,0.66,1.0],[0.91,0.74,0.8],[0.48,0.86,1.2],[0.25,0.80,0.7]];
+    for (let i = 0; i < clouds.length; i++) {
+      puff(clouds[i][0]*w, clouds[i][1]*h, 38*clouds[i][2]*Math.min(1, w/900));
+    }
+  }
+  function puff(x, y, r) {
+    ctx.beginPath();
+    ctx.ellipse(x, y, r*1.5, r*0.55, 0, 0, Math.PI*2);
+    ctx.ellipse(x-r*0.7, y+r*0.12, r*0.75, r*0.42, 0, 0, Math.PI*2);
+    ctx.ellipse(x+r*0.6, y+r*0.18, r*0.85, r*0.46, 0, 0, Math.PI*2);
+    ctx.ellipse(x+r*0.1, y-r*0.32, r*0.8, r*0.5, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  function drawQuad(it) {
+    const q = it.quad;
+    ctx.beginPath();
+    const p0 = project(q[0]); ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < q.length; i++) { const p = project(q[i]); ctx.lineTo(p.x, p.y); }
+    ctx.closePath();
+    ctx.fillStyle = it.fill; ctx.fill();
+    ctx.strokeStyle = it.fill; ctx.lineWidth = 1; ctx.stroke();
+  }
+  function drawCable(it) {
+    const a = project(it.a), b = project(it.b);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = 'rgba(30,26,24,0.6)';
+    ctx.lineWidth = Math.max(1.1, 0.14*scale); ctx.lineCap = 'round'; ctx.stroke();
+  }
+  function envelopePath(c, r) {
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y + r*1.5);
+    ctx.bezierCurveTo(c.x-r*0.72, c.y+r*0.8, c.x-r, c.y+r*0.22, c.x-r, c.y-r*0.1);
+    ctx.bezierCurveTo(c.x-r, c.y-r*1.15, c.x+r, c.y-r*1.15, c.x+r, c.y-r*0.1);
+    ctx.bezierCurveTo(c.x+r, c.y+r*0.22, c.x+r*0.72, c.y+r*0.8, c.x, c.y+r*1.5);
+    ctx.closePath();
+  }
+  function drawBalloon(it, k0, burnGlow) {
+    const c = project(it.centre), r = BALLOON_R * scale;
+    const k = k0;
+    const body = 'rgb(' + Math.round(BALLOON_COLOR[0]*k) + ',' +
+                          Math.round(BALLOON_COLOR[1]*k) + ',' +
+                          Math.round(BALLOON_COLOR[2]*k) + ')';
+    const loadY = c.y + r*1.5 + r*0.20, loadW = r*0.30;
+
+    ctx.strokeStyle = 'rgba(30,26,24,0.72)';
+    ctx.lineWidth = Math.max(1, r*0.016);
+    ctx.beginPath();
+    for (let i = 0; i < it.fan.length; i++) {
+      const a = project(it.fan[i]);
+      ctx.moveTo(c.x, loadY + r*0.16); ctx.lineTo(a.x, a.y);
+    }
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(c.x-r*0.24, c.y+r*1.28); ctx.lineTo(c.x-loadW*0.5, loadY);
+    ctx.moveTo(c.x+r*0.24, c.y+r*1.28); ctx.lineTo(c.x+loadW*0.5, loadY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(c.x-loadW*0.5, loadY); ctx.lineTo(c.x+loadW*0.5, loadY);
+    ctx.lineTo(c.x+loadW*0.4, loadY+r*0.16); ctx.lineTo(c.x-loadW*0.4, loadY+r*0.16);
+    ctx.closePath();
+    ctx.fillStyle = 'rgb(' + Math.round(141*k) + ',' + Math.round(98*k) + ',' + Math.round(52*k) + ')';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,40,20,0.9)'; ctx.stroke();
+
+    ctx.save();
+    envelopePath(c, r);
+    ctx.fillStyle = body; ctx.fill(); ctx.clip();
+    ctx.fillStyle = 'rgb(' + Math.round(255*k) + ',' + Math.round(255*k) + ',' + Math.round(150*k) + ')';
+    for (let g = -2; g <= 2; g += 2) {
+      ctx.beginPath();
+      ctx.ellipse(c.x + g*r*0.42, c.y, r*0.15, r*1.4, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+    if (burnGlow > 0) {                      // burner lighting the envelope from below
+      const bg = ctx.createRadialGradient(c.x, c.y + r*1.35, r*0.05, c.x, c.y + r*0.3, r*1.5);
+      bg.addColorStop(0, 'rgba(255,186,96,' + (0.55*burnGlow).toFixed(3) + ')');
+      bg.addColorStop(1, 'rgba(255,150,60,0)');
+      ctx.fillStyle = bg; ctx.fillRect(c.x-r*1.2, c.y-r*1.6, r*2.4, r*3.4);
+    }
+    const gr = ctx.createRadialGradient(c.x-r*0.4, c.y-r*0.55, r*0.1, c.x, c.y, r*1.7);
+    gr.addColorStop(0, 'rgba(255,255,255,0.42)');
+    gr.addColorStop(0.45, 'rgba(255,255,255,0)');
+    gr.addColorStop(1, 'rgba(0,0,0,0.40)');
+    ctx.fillStyle = gr; ctx.fillRect(c.x-r*1.2, c.y-r*1.6, r*2.4, r*3.4);
+    ctx.restore();
+
+    envelopePath(c, r);
+    ctx.strokeStyle = 'rgba(0,0,0,0.24)';
+    ctx.lineWidth = Math.max(1, r*0.015); ctx.stroke();
+  }
+
+  // ==========================================================================
+  // timeline
+  // ==========================================================================
+  const tlc = document.getElementById('tlcanvas');
+  const tctx = tlc.getContext('2d');
+  const WINDOW_BACK = 35, WINDOW_FWD = 105;
+
+  function sizeTimeline() {
+    const dpr = window.devicePixelRatio || 1;
+    const r = tlc.getBoundingClientRect();
+    tlc.width = Math.max(1, Math.round(r.width*dpr));
+    tlc.height = Math.max(1, Math.round(r.height*dpr));
+    tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function drawTimeline(st) {
+    const r = tlc.getBoundingClientRect();
+    const W = r.width, H = r.height;
+    if (W < 2) return;
+    tctx.clearRect(0, 0, W, H);
+
+    const padL = Math.min(88, W*0.16), padR = 14, padT = 16, padB = 20;
+    const plotW = W - padL - padR;
+    const rowH = (H - padT - padB) / CROPS.length;
+    const day0 = st.missionDay - WINDOW_BACK, span = WINDOW_BACK + WINDOW_FWD;
+    const X = function (d) { return padL + (d - day0) / span * plotW; };
+
+    // day grid
+    tctx.font = '9px ui-monospace, Menlo, monospace';
+    tctx.textBaseline = 'top';
+    for (let d = Math.ceil(day0/10)*10; d <= day0+span; d += 10) {
+      const x = X(d);
+      tctx.strokeStyle = 'rgba(111,224,255,0.10)';
+      tctx.beginPath(); tctx.moveTo(x, padT-6); tctx.lineTo(x, H-padB+3); tctx.stroke();
+      tctx.fillStyle = 'rgba(122,163,184,0.75)';
+      tctx.textAlign = 'center';
+      tctx.fillText('D' + d, x, H-padB+6);
+    }
+
+    for (let i = 0; i < CROPS.length; i++) {
+      const c = CROPS[i];
+      const y = padT + i*rowH, bh = Math.max(9, rowH*0.52);
+      const by = y + (rowH - bh)/2;
+
+      tctx.fillStyle = 'rgba(215,242,255,0.92)';
+      tctx.textAlign = 'left'; tctx.textBaseline = 'middle';
+      tctx.fillRect(8, by + bh/2 - 4, 8, 8);
+      tctx.fillStyle = 'rgb(' + c.rgb.join(',') + ')';
+      tctx.fillRect(8, by + bh/2 - 4, 8, 8);
+      tctx.fillStyle = 'rgba(215,242,255,0.9)';
+      tctx.fillText(c.name, 22, by + bh/2);
+
+      const period = c.days + TURNAROUND;
+      let k = Math.floor((day0 - c.off) / period) - 1;
+      for (; ; k++) {
+        const start = c.off + k*period;
+        if (start > day0 + span) break;
+        if (start + period < day0) continue;
+        let acc = start;
+        for (let p = 0; p < PHASES.length; p++) {
+          const len = PHASES[p].f * c.days;
+          const x0 = X(acc), x1 = X(acc + len);
+          if (x1 > padL && x0 < padL + plotW) {
+            tctx.fillStyle = PHASES[p].css;
+            const cx0 = Math.max(padL, x0), cx1 = Math.min(padL+plotW, x1);
+            tctx.fillRect(cx0, by, Math.max(0.6, cx1-cx0), bh);
+          }
+          acc += len;
+        }
+        // turnaround gap
+        const gx0 = X(acc), gx1 = X(acc + TURNAROUND);
+        if (gx1 > padL && gx0 < padL+plotW) {
+          tctx.fillStyle = '#2a3d4d';
+          const cx0 = Math.max(padL, gx0), cx1 = Math.min(padL+plotW, gx1);
+          tctx.fillRect(cx0, by, Math.max(0.6, cx1-cx0), bh);
+        }
+        // harvest marker at the end of maturity
+        const hx = X(start + c.days);
+        if (hx > padL && hx < padL+plotW) {
+          tctx.fillStyle = '#ffd98a';
+          tctx.beginPath();
+          tctx.moveTo(hx, by-3); tctx.lineTo(hx-3.5, by-8.5); tctx.lineTo(hx+3.5, by-8.5);
+          tctx.closePath(); tctx.fill();
+        }
+      }
+    }
+
+    // now marker
+    const nx = X(st.missionDay + st.hours/24);
+    tctx.strokeStyle = '#ffc861';
+    tctx.lineWidth = 1.5;
+    tctx.beginPath(); tctx.moveTo(nx, padT-10); tctx.lineTo(nx, H-padB+2); tctx.stroke();
+    tctx.fillStyle = '#ffc861';
+    tctx.beginPath();
+    tctx.moveTo(nx, padT-10); tctx.lineTo(nx-4, padT-16); tctx.lineTo(nx+4, padT-16);
+    tctx.closePath(); tctx.fill();
+  }
+
+  // ==========================================================================
+  // HUD
+  // ==========================================================================
+  const el = {};
+  ['clock','mday','datestr','latlon','alt','hdg','drift','temp','gband','gneedle',
+   'rh','wind','vpd','daylen','rise','set','elev','mkrise','mkset','mknow',
+   'mass','lift','margin','envt','fuel','burn','teth','tilt','lifttag',
+   'wres','et','wdrawn','wcap','wdays','croplist','candlist','status']
+   .forEach(function (id) { el[id] = document.getElementById(id); });
+
+  function hhmm(h) {
+    const hh = Math.floor(((h % 24) + 24) % 24), mm = Math.floor((h - Math.floor(h)) * 60);
+    return pad2(hh) + ':' + pad2((mm + 60) % 60);
+  }
+
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const CANDIDATES = [
+    { name: 'hold station', brg: '—',    dist: 0,   dt:  0.0 },
+    { name: 'NNE 240 km',   brg: '022°', dist: 240, dt: -1.4 },
+    { name: 'W 410 km',     brg: '271°', dist: 410, dt: +0.9 },
+    { name: 'SSW 620 km',   brg: '203°', dist: 620, dt: +2.6 }
+  ];
+
+  let cropRows = null, candRows = null;
+
+  function buildRows() {
+    el.croplist.innerHTML = CROPS.map(function (c, i) {
+      return '<div class="croprow">' +
+        '<span class="sw" style="background:rgb(' + c.rgb.join(',') + ')"></span>' +
+        '<span><span class="cname">' + c.name + '</span> ' +
+          '<span class="cphase" data-ph="' + i + '"></span>' +
+          '<span class="bar" style="color:rgb(' + c.rgb.join(',') + ')">' +
+            '<i data-bar="' + i + '"></i></span></span>' +
+        '<span class="cdays"><b data-dd="' + i + '"></b><i> d</i></span>' +
+      '</div>';
+    }).join('');
+    cropRows = CROPS.map(function (c, i) {
+      return {
+        ph: el.croplist.querySelector('[data-ph="' + i + '"]'),
+        bar: el.croplist.querySelector('[data-bar="' + i + '"]'),
+        dd: el.croplist.querySelector('[data-dd="' + i + '"]')
+      };
+    });
+
+    el.candlist.innerHTML = CANDIDATES.map(function (c, i) {
+      return '<div class="cand"><div class="hd">' +
+        '<span class="nm">' + c.name + '</span>' +
+        '<span class="sc" data-sc="' + i + '"></span></div>' +
+        '<div class="dt" data-dt="' + i + '"></div></div>';
+    }).join('');
+    candRows = CANDIDATES.map(function (c, i) {
+      return { sc: el.candlist.querySelector('[data-sc="' + i + '"]'),
+               dt: el.candlist.querySelector('[data-dt="' + i + '"]') };
+    });
+  }
+
+  function fitScore(t) {
+    // 100 at the centre of the 18-20 band, falling away outside it
+    if (t >= TARGET_LO && t <= TARGET_HI) return 100 - Math.abs(t - 19) * 4;
+    const d = t < TARGET_LO ? TARGET_LO - t : t - TARGET_HI;
+    return Math.max(0, 96 - d * 13);
+  }
+
+  function updateHUD(st) {
+    el.clock.textContent = hhmm(st.hours) + ' UTC';
+    el.mday.textContent = st.missionDay;
+    el.datestr.textContent = st.d.getUTCDate() + ' ' + MONTHS[st.d.getUTCMonth()] +
+                             ' ' + st.d.getUTCFullYear();
+
+    const ns = sim.lat >= 0 ? 'N' : 'S', ew = sim.lon >= 0 ? 'E' : 'W';
+    el.latlon.textContent = Math.abs(sim.lat).toFixed(2) + '°' + ns + '  ' +
+                            Math.abs(sim.lon).toFixed(2) + '°' + ew;
+    el.alt.textContent = Math.round(sim.alt) + ' m AMSL';
+    el.hdg.textContent = pad2(Math.round(sim.hdg)) + '°';
+    el.drift.textContent = sim.drift.toFixed(0) + ' km/h';
+
+    el.temp.textContent = st.temp.toFixed(1);
+    const lo = 8, hi = 32;
+    const pc = function (t) { return ((t - lo) / (hi - lo)) * 100; };
+    el.gband.style.left = pc(TARGET_LO) + '%';
+    el.gband.style.width = (pc(TARGET_HI) - pc(TARGET_LO)) + '%';
+    el.gneedle.style.left = Math.max(0, Math.min(100, pc(st.temp))) + '%';
+    const inBand = st.temp >= TARGET_LO && st.temp <= TARGET_HI;
+    el.temp.className = inBand ? 'ok' : 'hi';
+    el.temp.style.color = inBand ? 'var(--green)' : 'var(--amber)';
+
+    el.rh.textContent = st.rh.toFixed(0);
+    el.wind.textContent = sim.drift.toFixed(0) + ' km/h ' + pad2(Math.round(sim.hdg)) + '°';
+    el.vpd.textContent = st.vpd.toFixed(2);
+
+    el.daylen.textContent = hhmm(st.sun.dayLen);
+    el.rise.textContent = hhmm(st.sun.rise);
+    el.set.textContent = hhmm(st.sun.set);
+    el.elev.textContent = st.sun.elev.toFixed(0);
+    el.mkrise.style.left = (st.sun.rise / 24 * 100) + '%';
+    el.mkset.style.left = (st.sun.set / 24 * 100) + '%';
+    el.mknow.style.left = (st.hours / 24 * 100) + '%';
+
+    // lift: mass grows with standing biomass, lift falls as fuel burns
+    const biomass = 1.9 + Math.sin(st.missionDay / 34) * 0.55;
+    const mass = 69.5 + biomass;
+    const gross = 77.5 - (1 - sim.fuel) * 1.1;
+    el.mass.textContent = mass.toFixed(1) + ' t';
+    el.lift.textContent = gross.toFixed(1) + ' t';
+    const marg = (gross - mass) / mass * 100;
+    el.margin.textContent = (marg >= 0 ? '+' : '') + marg.toFixed(1) + ' %';
+    el.margin.className = 'v ' + (marg > 5 ? 'ok' : marg > 1 ? 'hi' : 'no');
+    const envt = 108 + Math.sin(st.hours / 3.3) * 5 + (19 - st.temp) * 0.8;
+    el.envt.textContent = envt.toFixed(0) + ' °C';
+    el.fuel.textContent = (sim.fuel * 100).toFixed(0) + ' %';
+    el.fuel.className = 'v ' + (sim.fuel > 0.3 ? 'ok' : sim.fuel > 0.15 ? 'hi' : 'no');
+    const burn = 41 + Math.max(0, 19 - st.temp) * 3.2;
+    el.burn.textContent = burn.toFixed(0) + ' kg/h';
+    el.teth.textContent = '±1.2 %';
+    el.tilt.textContent = '0.04°';
+    el.lifttag.textContent = '5 × 60,000 m³';
+
+    // water
+    const drawn = st.et * 209 / 1000;
+    el.wres.textContent = (sim.water * 100).toFixed(0) + ' %  ·  ' +
+                          (sim.water * 4.6).toFixed(1) + ' t';
+    el.et.textContent = st.et.toFixed(1) + ' mm/d';
+    el.wdrawn.textContent = drawn.toFixed(2) + ' t';
+    el.wcap.textContent = (0.18 + Math.max(0, Math.sin(st.missionDay/7)) * 0.5).toFixed(2) + ' t';
+    const dd = sim.water * 4600 / Math.max(1, st.et * 209);
+    el.wdays.textContent = dd.toFixed(1) + ' d';
+    el.wdays.className = 'v ' + (dd > 5 ? 'ok' : dd > 2 ? 'hi' : 'no');
+
+    // crops
+    for (let i = 0; i < CROPS.length; i++) {
+      const cy = cropCycle(CROPS[i], st.missionDay + st.hours/24);
+      cropRows[i].ph.textContent = cy.phase;
+      cropRows[i].bar.style.width = (cy.progress * 100).toFixed(1) + '%';
+      cropRows[i].dd.textContent = cy.toHarvest;
+      cropRows[i].dd.parentNode.style.color =
+        cy.inGap ? 'var(--dim)' : cy.toHarvest <= 7 ? 'var(--amber)' : 'var(--ink)';
+    }
+
+    // relocation candidates
+    let best = -1, bestI = 0;
+    for (let i = 0; i < CANDIDATES.length; i++) {
+      const t = st.temp + CANDIDATES[i].dt;
+      const s = fitScore(t);
+      if (s > best) { best = s; bestI = i; }
+      candRows[i].sc.textContent = s.toFixed(0);
+      candRows[i].sc.style.color = s >= 88 ? 'var(--green)' : s >= 65 ? 'var(--amber)' : 'var(--red)';
+      candRows[i].dt.textContent = CANDIDATES[i].brg + '  ·  ' +
+        (CANDIDATES[i].dist ? CANDIDATES[i].dist + ' km  ·  ' : '') +
+        t.toFixed(1) + ' °C  ·  ' + (CANDIDATES[i].dist / 17 || 0).toFixed(0) + ' h';
+    }
+    for (let i = 0; i < CANDIDATES.length; i++) {
+      candRows[i].sc.parentNode.parentNode.style.background =
+        i === bestI ? 'rgba(123,234,154,0.09)' : 'transparent';
+    }
+
+    const ok = inBand && marg > 3 && sim.fuel > 0.2;
+    el.status.textContent = ok ? 'nominal' : 'attention';
+    el.status.style.color = ok ? 'var(--green)' : 'var(--amber)';
+  }
+
+  // ==========================================================================
+  // loop
+  // ==========================================================================
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(250, now - last); last = now;
+    sim.t += dt * SPEED;
+    sim.lat += Math.sin(sim.t / 9.7e8) * 0.00016 * dt / 16;
+    sim.lon += 0.00042 * dt / 16;
+    sim.hdg = 60 + Math.sin(sim.t / 4.1e8) * 22;
+    sim.drift = 14 + Math.sin(sim.t / 2.7e8) * 7;
+    sim.fuel = Math.max(0.06, 0.78 - ((sim.t - START) / 86400000) * 0.0031);
+    sim.water = 0.36 + 0.3 * (1 + Math.sin((sim.t - START) / 86400000 / 6));
+
+    const st = readState();
+    const w = window.innerWidth, h = window.innerHeight;
+    const elev = st.sun.elev;
+    // scene brightness follows the sun; burner glow takes over after dark
+    const k0 = Math.max(0.30, Math.min(1, (elev + 9) / 26));
+    const burnGlow = Math.max(0, Math.min(1, (6 - elev) / 14));
+
+    drawSky(w, h, elev);
+    const bob = Math.sin(now / 2400) * 0.30;
+    const items = buildScene(bob, k0);
+    for (let i = 0; i < items.length; i++) {
+      const k = items[i].kind;
+      if (k === 'quad') drawQuad(items[i]);
+      else if (k === 'cable') drawCable(items[i]);
+      else drawBalloon(items[i], k0, burnGlow);
+    }
+
+    updateHUD(st);
+    drawTimeline(st);
+    requestAnimationFrame(frame);
+  }
+
+  buildRows();
+  window.addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
