@@ -9,6 +9,7 @@
     --ink: #d7f2ff; --dim: #7aa3b8; --cyan: #6fe0ff; --amber: #ffc861;
     --green: #7bea9a; --red: #ff7a6e; --panel: rgba(6,17,27,0.62);
     --edge: rgba(111,224,255,0.22);
+    --colw: 226px; --colrw: 300px; --mapw: 560px;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0a1622; }
@@ -90,19 +91,23 @@
     gap: 12px; overflow-y: auto; overflow-x: hidden; pointer-events: auto;
     scrollbar-width: none; }
   .col::-webkit-scrollbar { display: none; }
-  #colL { left: 14px; --colw: 226px; --mapw: 440px; width: var(--colw); }
-  #colL.wide { width: var(--mapw); }
-  #colL > .panel { width: var(--colw); }
-  #colL > #position { width: 100%; flex: 1 1 auto; min-height: 168px;
+  #colL { left: 14px; width: var(--colw); }
+  #colM { left: calc(14px + var(--colw) + 12px);
+    width: clamp(280px, calc(100vw - var(--colw) - var(--colrw) - 52px), var(--mapw)); }
+  #colR { right: 14px; width: var(--colrw); }
+  .col > .panel { flex: 0 0 auto; }
+  /* the map column holds nothing else, so the map takes all of it */
+  #colM > #position { flex: 1 1 auto; min-height: 168px;
     display: flex; flex-direction: column; }
-  #colL > #position.collapsed { flex: 0 0 auto; min-height: 0; }
+  #colM > #position.collapsed { flex: 0 0 auto; min-height: 0; }
   #position .body { flex: 1 1 auto; min-height: 0; display: flex;
     flex-direction: column; }
-  #colR { right: 14px; width: 300px; }
-  .col > .panel { flex: 0 0 auto; }
+  /* this rule carries an id, so it outranks .panel.collapsed .body and has to
+     say the collapsed case itself or the map stays up with the panel shut */
+  #position.collapsed .body { display: none; }
 
-  /* world map. Expanded it is wider than the column and sits over the
-     vehicle, which is what it is for: the scene is scenery, this is the fix. */
+  /* world map. Its column sits over the vehicle, which is what it is for:
+     the scene is scenery, this is the fix. */
   .mapwrap { position: relative; flex: 1 1 auto; min-height: 0; }
   #mapcanvas { display: block; width: 100%; height: 100%; cursor: grab;
     background: #051119; border: 1px solid rgba(111,224,255,0.18); }
@@ -168,9 +173,11 @@
   #sim { position: absolute; bottom: 186px; left: 14px; font-size: 8.5px;
     letter-spacing: 0.14em; color: var(--dim); text-transform: uppercase; opacity: 0.75; }
 
-  @media (max-width: 1120px) { #colL { --colw: 198px; --mapw: 372px; }
-    #colR { width: 268px; } }
-  @media (max-width: 940px) { #colL { display: none; } #top .cell.opt { display: none; } }
+  @media (max-width: 1120px) { :root { --colw: 198px; --colrw: 268px; } }
+  @media (max-width: 940px) { #colL { display: none; } #top .cell.opt { display: none; }
+    #colM { left: 14px; } }
+  /* below this the map column would run into the right-hand one */
+  @media (max-width: 700px) { #colM { display: none; } }
   @media (max-width: 640px) { #colR { left: 14px; right: 14px; width: auto; }
     #tl { height: 150px; } #tlcanvas { height: 116px; } }
   @media (max-height: 620px) { #colR, #colL { bottom: 160px; } }
@@ -239,6 +246,9 @@
         <div class="row"><span class="k">deck tilt</span><span class="v" id="tilt">—</span></div>
       </div>
     </div>
+  </div>
+
+  <div class="col" id="colM">
     <div class="panel" id="position">
       <div class="ttl"><span class="lhs"><span class="chev">&#9662;</span>Position</span>
         <b id="maptag">&mdash;</b></div>
@@ -882,7 +892,6 @@
   const zoomOut = document.getElementById('zoomout');
   const recentre = document.getElementById('recentre');
   const mapTag = document.getElementById('maptag');
-  const colL = document.getElementById('colL');
   const posPanel = document.getElementById('position');
 
   const ZOOMS = [1, 2, 4, 8, 16, 32, 64];
@@ -905,11 +914,6 @@
     mapDirty = true;
   }
 
-  function syncMapWidth() {
-    colL.classList.toggle('wide', !posPanel.classList.contains('collapsed'));
-    sizeMap();
-  }
-
   function syncMapCtl() {
     mapTag.textContent = ZOOMS[map.zi] + '\u00d7';
     zoomIn.disabled = map.zi >= ZOOMS.length - 1;
@@ -927,6 +931,19 @@
     mapDirty = true; syncMapCtl();
   }
 
+  // Web Mercator. Plate carree makes a world twice as wide as it is tall, and
+  // in a tall column that left a third of the canvas empty above and below it.
+  // Mercator's world is square, so it fills the column, and it is the
+  // projection the weather layers will arrive in.
+  const MERC_LAT = 85.051129;                      // where the square closes
+  function mercY(lat) {                            // degrees -> 0 (N) .. 1 (S)
+    const s = Math.sin(Math.max(-MERC_LAT, Math.min(MERC_LAT, lat)) * D);
+    return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
+  }
+  function mercLat(y) {                            // and back again
+    return (2 * Math.atan(Math.exp((0.5 - y) * 2 * Math.PI)) - Math.PI / 2) / D;
+  }
+
   // every label on the map lands on coastline sooner or later, so carry a halo
   function mapLabel(text, x, y, fill) {
     mctx.strokeStyle = 'rgba(5,17,25,0.9)';
@@ -939,24 +956,28 @@
   function drawMap() {
     const r = mapc.getBoundingClientRect(), W = r.width, H = r.height;
     if (W < 2 || H < 2) return;
-    const z = ZOOMS[map.zi], ppd = W / (360 / z), halfLat = H / 2 / ppd;
+    // the whole world is S x S px; at 1x it fits the short side of the canvas
+    const z = ZOOMS[map.zi], S = Math.min(W, H) * z, ppd = S / 360;
     const cLon = map.lon === null ? sim.lon : map.lon;
-    let cLat = map.lat === null ? sim.lat : map.lat;
-    cLat = halfLat >= 90 ? 0
-         : Math.max(-90 + halfLat, Math.min(90 - halfLat, cLat));
+    const halfN = H / 2 / S;
+    let cy = mercY(map.lat === null ? sim.lat : map.lat);
+    cy = halfN >= 0.5 ? 0.5 : Math.max(halfN, Math.min(1 - halfN, cy));
+    const cLat = mercLat(cy);
     const X = function (lon) { return W / 2 + (lon - cLon) * ppd; };
-    const Y = function (lat) { return H / 2 - (lat - cLat) * ppd; };
-    view = { cLon: cLon, cLat: cLat, ppd: ppd };
+    const Y = function (lat) { return H / 2 + (mercY(lat) - cy) * S; };
+    view = { cLon: cLon, cLat: cLat, cy: cy, ppd: ppd, S: S };
 
     mctx.clearRect(0, 0, W, H);
     mctx.fillStyle = '#051119'; mctx.fillRect(0, 0, W, H);
-    const yN = Y(90), yS = Y(-90);
+    const yN = Y(MERC_LAT), yS = Y(-MERC_LAT);
     mctx.fillStyle = '#08202f';
     mctx.fillRect(0, Math.max(0, yN), W, Math.min(H, yS) - Math.max(0, yN));
 
     // --- LAYERS: weather goes here, between the ocean and the coastline ----
 
-    const step = z <= 1 ? 30 : z <= 4 ? 15 : z <= 16 ? 5 : 1;
+    const span = (W / S) * 360;                    // degrees of longitude in view
+    const step = span > 170 ? 30 : span > 80 ? 15 : span > 20 ? 5 : span > 6 ? 2 : 1;
+    const half = span / 2;
     mctx.lineWidth = 1;
     mctx.font = '8px ui-monospace, Menlo, monospace';
     mctx.strokeStyle = 'rgba(111,224,255,0.10)';
@@ -965,8 +986,8 @@
       const y = Y(lat); if (y < 0 || y > H) continue;
       mctx.moveTo(0, y); mctx.lineTo(W, y);
     }
-    const lon0 = Math.ceil((cLon - 180 / z) / step) * step;
-    for (let lon = lon0; lon <= cLon + 180 / z; lon += step) {
+    const lon0 = Math.ceil((cLon - half) / step) * step;
+    for (let lon = lon0; lon <= cLon + half; lon += step) {
       const x = X(lon); mctx.moveTo(x, 0); mctx.lineTo(x, H);
     }
     mctx.stroke();
@@ -1004,7 +1025,7 @@
       mapLabel(Math.abs(lat) + (lat === 0 ? '' : lat > 0 ? 'N' : 'S'), 3, y - 5, GRID);
     }
     mctx.textAlign = 'center'; mctx.textBaseline = 'bottom';
-    for (let lon = lon0; lon <= cLon + 180 / z; lon += step) {
+    for (let lon = lon0; lon <= cLon + half; lon += step) {
       const x = X(lon), w = ((lon + 180) % 360 + 360) % 360 - 180;
       if (x < 14 || x > W - 14) continue;
       mapLabel(Math.abs(w) + (w === 0 ? '' : w > 0 ? 'E' : 'W'), x, H - 3, GRID);
@@ -1040,7 +1061,7 @@
     mapLabel('FF1', mx + 10, my + 6, '#ffc861');
 
     // scale bar, true at the latitude in the middle of the view
-    const kmpp = 111.32 * Math.cos(cLat * D) / ppd;
+    const kmpp = 40075 * Math.cos(cLat * D) / S;
     let km = SCALES[0];
     for (let i = 0; i < SCALES.length; i++) if (SCALES[i] / kmpp < W * 0.32) km = SCALES[i];
     const bar = km / kmpp, bx = 8, by = H - 19;
@@ -1064,7 +1085,7 @@
     if (mapDirty) { drawMap(); mapDirty = false; }   // never drag on a stale view
     if (!view) return;
     const t = e.touches ? e.touches[0] : e;
-    mapDrag = { x: t.clientX, y: t.clientY, lon: view.cLon, lat: view.cLat };
+    mapDrag = { x: t.clientX, y: t.clientY, lon: view.cLon, cy: view.cy };
     mapWrap.classList.add('grabbing');
     e.preventDefault();
   }
@@ -1073,7 +1094,8 @@
     const t = e.touches ? e.touches[0] : e;
     const lon = mapDrag.lon - (t.clientX - mapDrag.x) / view.ppd;
     map.lon = ((lon + 180) % 360 + 360) % 360 - 180;
-    map.lat = mapDrag.lat + (t.clientY - mapDrag.y) / view.ppd;
+    const ny = mapDrag.cy - (t.clientY - mapDrag.y) / view.S;
+    map.lat = mercLat(Math.max(0, Math.min(1, ny)));
     mapDirty = true; syncMapCtl(); e.preventDefault();
   }
   function mapRelease() { mapDrag = null; mapWrap.classList.remove('grabbing'); }
@@ -1161,10 +1183,7 @@
 
   // every panel collapses on its own title, the top strip and timeline included
   document.querySelectorAll('.panel .ttl').forEach(function (t) {
-    t.addEventListener('click', function () {
-      t.parentNode.classList.toggle('collapsed');
-      syncMapWidth();               // the map panel is wider than its column
-    });
+    t.addEventListener('click', function () { t.parentNode.classList.toggle('collapsed'); });
   });
   [['toptoggle','top'],['tltoggle','tl']].forEach(function (pair) {
     const btn = document.getElementById(pair[0]), box = document.getElementById(pair[1]);
@@ -1323,7 +1342,7 @@
   }
 
   buildRows();
-  syncMapWidth(); syncMapCtl();
+  syncMapCtl();
   window.addEventListener('resize', resize);
   resize();
   requestAnimationFrame(frame);
