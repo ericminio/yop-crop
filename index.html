@@ -251,11 +251,14 @@
   'use strict';
 
   // ==========================================================================
-  // FF1: a 4 m wide ring carrying 209 m2 of bed, lifted by five 60,000 m3
-  // envelopes standing off 40 m so they do not eclipse the crops.
+  // FF1: a 4 m wide ring carrying 209 m2 of bed, lifted by five 49,500 m3
+  // envelopes standing off 39 m so they do not eclipse the crops. Losing
+  // sunflower's 60 cm bed took 3 t off the deck, which shrank the envelopes,
+  // which pulled the standoff in (they pack closer) and the tethers nearer
+  // vertical, which took off more lift still: 77.5 t gross became 73.5.
   // ==========================================================================
   const R_OUT = 10.32, R_IN = 6.32;
-  const BALLOON_R = 24.3, STANDOFF = 40.0, LIFT_H = 60.0, BALLOONS = 5;
+  const BALLOON_R = 22.8, STANDOFF = 38.8, LIFT_H = 60.0, BALLOONS = 5;
   const SUBDIV = 4, RING_PHASE = (9 * Math.PI) / 180;
   const TARGET_LO = 18, TARGET_HI = 20;
   const TURNAROUND = 10;
@@ -293,7 +296,7 @@
   // ==========================================================================
   const LAUNCH = Date.UTC(2026, 2, 14, 6, 0);      // 14 Mar 2026
   const sim = { lat: 43.6, lon: -1.4, alt: 1180, hdg: 68, drift: 17,
-                fuel: 0.62, cloud: 0.22, water: 9.9 };
+                fuel: 0.62, cloud: 0.22, water: 9.6 };
   let scrub = null;                                 // mission-day float, or null = now
 
   const D = Math.PI / 180;
@@ -757,8 +760,8 @@
     el.mkset.style.left = (st.sun.set/24*100)+'%';
     el.mknow.style.left = (st.hours/24*100)+'%';
 
-    const mass = 69.5 + 1.9 + Math.sin(st.missionDay/34)*0.55;
-    const gross = 77.5 - (1-sim.fuel)*1.1;
+    const mass = 66.5 + 1.9 + Math.sin(st.missionDay/34)*0.55;
+    const gross = 73.5 - (1-sim.fuel)*1.1;
     el.mass.textContent = mass.toFixed(1)+' t';
     el.lift.textContent = gross.toFixed(1)+' t';
     const marg = (gross-mass)/mass*100;
@@ -768,8 +771,8 @@
     el.fuel.textContent = (sim.fuel*100).toFixed(0)+' %';
     el.fuel.className = 'v '+(sim.fuel>0.3?'ok':sim.fuel>0.15?'hi':'no');
     el.burn.textContent = (41+Math.max(0,19-st.temp)*3.2).toFixed(0)+' kg/h';
-    el.teth.textContent = '±1.2 %'; el.tilt.textContent = '0.04°';
-    el.lifttag.textContent = '5 × 60,000 m³';
+    el.teth.textContent = '±1.2 %'; el.tilt.textContent = '0.00°';
+    el.lifttag.textContent = '5 × 49,500 m³';
 
     // deck water draw at the phases in play right now
     let draw = 0;
