@@ -379,8 +379,10 @@
     const k=(0.52+0.48*l)*k0;
     return 'rgb('+Math.round(rgb[0]*k)+','+Math.round(rgb[1]*k)+','+Math.round(rgb[2]*k)+')'; }
 
+  // One identical segment per tether, and each segment CENTRED on its balloon,
+  // so a tether hangs over the middle of the crops it carries.
   const SECTORS = (function () {
-    const out = []; let a = -Math.PI/2;
+    const out = []; let a = RING_PHASE - Math.PI/BALLOONS;
     for (let k = 0; k < BALLOONS; k++) {
       for (let i = 0; i < CROPS.length; i++) {
         const span = (CROPS[i].area / BALLOONS / TOTAL_AREA) * Math.PI * 2;
@@ -427,14 +429,28 @@
     return items;
   }
 
+  // Bound what is actually painted, not an approximation of it. The envelope
+  // bezier peaks 0.8875 r above its centre, the basket hangs 1.86 r below, and
+  // the whole vehicle bobs +/- BOB. Guessed pads left slack under FF1 and it
+  // floated high in the frame.
+  const BOB = 0.30;
+  const MAXD = CROPS.reduce(function(m,c){ return Math.max(m,c.depth); },0);
   const FIT = (function () {
     let mnX=Infinity,mxX=-Infinity,mnY=Infinity,mxY=-Infinity;
     function probe(p,px,pu,pd){ const s=iso(p);
       mnX=Math.min(mnX,s.x-px); mxX=Math.max(mxX,s.x+px);
       mnY=Math.min(mnY,s.y-pu); mxY=Math.max(mxY,s.y+pd); }
+    // the deck is a continuous ring, so sweep it
     for (let i=0;i<360;i++){ const a=(i/360)*Math.PI*2;
-      probe(cyl(R_OUT,a,-0.7),0,0,0);
-      probe(cyl(STANDOFF,a,LIFT_H),BALLOON_R*1.03,BALLOON_R*0.90,BALLOON_R*1.90); }
+      probe(cyl(R_OUT,a,BOB),0,0,0);                 // deck at its highest
+      probe(cyl(R_OUT,a,-MAXD-BOB),0,0,0); }         // and its lowest
+    // the balloons are FIVE, not a circle. Sweeping the standoff ring reserved
+    // room for a phantom envelope at the nearest bearing, which is what was
+    // pushing FF1 up in the frame.
+    for (let i=0;i<BALLOONS;i++){
+      const a = RING_PHASE + (i/BALLOONS)*Math.PI*2;
+      probe(cyl(STANDOFF,a,LIFT_H+BOB),BALLOON_R,BALLOON_R*0.8875,0);
+      probe(cyl(STANDOFF,a,LIFT_H-BOB),BALLOON_R,0,BALLOON_R*1.86); }
     return { w:mxX-mnX, h:mxY-mnY, cx:(mnX+mxX)/2, cy:(mnY+mxY)/2 };
   })();
 
@@ -451,7 +467,7 @@
     const botPad = (tlEl && tlEl.classList.contains('collapsed'))
                    ? 34 : (h > 700 ? 192 : 160);
     const usable = Math.max(160, h - topPad - botPad);
-    scale = Math.min(w/(FIT.w*1.06), usable/(FIT.h*1.02));
+    scale = Math.min(w/(FIT.w*1.04), usable/FIT.h);
     originX = w/2; originY = topPad + usable/2;
     sizeTimeline();
   }
