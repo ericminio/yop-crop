@@ -19,13 +19,15 @@
   // a 4 m wide ring deck carrying 209 m2 of beds, lifted by five 60,000 m3
   // envelopes standing off 40 m so they do not eclipse the crops. The tethers
   // pull outward on the rim, which a ring takes as pure hoop tension.
-  // Nobody lives aboard: 69.5 t is beds, irrigation reserve and structure.
+  // Nobody lives aboard and nobody walks on it: drones service it, so there
+  // are no paths and the whole deck is bed. 69.5 t is beds, irrigation
+  // reserve and structure.
 
   const canvas = document.getElementById('scene');
   const ctx = canvas.getContext('2d');
 
-  const R_OUT = 13.0;        // deck outer radius
-  const R_IN = 9.0;          // deck inner radius
+  const R_OUT = 10.32;       // deck outer radius: 209 m2 of bed in a 4 m ring
+  const R_IN = 6.32;         // no paths - drones reach every bed from above
   const BALLOON_R = 24.3;    // 60,000 m3 envelope
   const STANDOFF = 40.0;     // balloon ring radius
   const LIFT_H = 60.0;       // balloon height above the deck
@@ -36,11 +38,11 @@
 
   // bed area in m2 and bed depth in m, from the crop plan
   const CROPS = [
+    { name: 'kale',      area:   6, depth: 0.25, top: [ 61, 107,  79], side: [ 92,  74,  56] },
+    { name: 'carrot',    area:   4, depth: 0.35, top: [217, 139,  58], side: [ 92,  74,  56] },
     { name: 'potato',    area: 146, depth: 0.45, top: [ 95, 141,  62], side: [ 92,  74,  56] },
     { name: 'sunflower', area:  40, depth: 0.60, top: [227, 194,  74], side: [ 92,  74,  56] },
     { name: 'tomato',    area:  11, depth: 0.45, top: [192,  80,  64], side: [ 92,  74,  56] },
-    { name: 'kale',      area:   6, depth: 0.25, top: [ 61, 107,  79], side: [ 92,  74,  56] },
-    { name: 'carrot',    area:   4, depth: 0.35, top: [217, 139,  58], side: [ 92,  74,  56] },
     { name: 'onion',     area:   2, depth: 0.25, top: [185, 167, 196], side: [ 92,  74,  56] }
   ];
   const TOTAL_AREA = CROPS.reduce(function (s, c) { return s + c.area; }, 0);
@@ -88,14 +90,18 @@
     items.push({ kind: 'quad', depth: d / quad.length, quad: quad, fill: shade(rgb, n) });
   }
 
-  // sector angles, proportional to each crop's bed area
+  // One identical segment per tether. Contiguous arcs put the centre of mass
+  // 0.43 m off the axis, because a 60 cm sunflower bed weighs 2.4x what a 25 cm
+  // onion bed does per metre of arc. Interleaving costs nothing and cancels it.
   function sectors() {
     const out = [];
     let a = -Math.PI / 2;
-    for (let i = 0; i < CROPS.length; i++) {
-      const span = (CROPS[i].area / TOTAL_AREA) * Math.PI * 2;
-      out.push({ crop: CROPS[i], a0: a, a1: a + span });
-      a += span;
+    for (let k = 0; k < BALLOONS; k++) {
+      for (let i = 0; i < CROPS.length; i++) {
+        const span = (CROPS[i].area / BALLOONS / TOTAL_AREA) * Math.PI * 2;
+        out.push({ crop: CROPS[i], a0: a, a1: a + span });
+        a += span;
+      }
     }
     return out;
   }
@@ -109,7 +115,7 @@
       const sec = SECTORS[s];
       const zTop = bob;
       const zBot = bob - sec.crop.depth;
-      const steps = Math.max(3, Math.ceil((sec.a1 - sec.a0) / (Math.PI / 180) / SUBDIV));
+      const steps = Math.max(2, Math.ceil((sec.a1 - sec.a0) / (Math.PI / 180) / SUBDIV));
       const step = (sec.a1 - sec.a0) / steps;
 
       for (let k = 0; k < steps; k++) {
@@ -331,7 +337,9 @@
     }
     y += line * 0.4;
     ctx.fillStyle = 'rgba(20,40,55,0.6)';
-    ctx.fillText('5 × 60,000 m³ · 40 m standoff, 60 m up', pad, y);
+    ctx.fillText('5 × 60,000 m³ · 40 m standoff, 60 m up · tethers 26° off vertical', pad, y);
+    y += line;
+    ctx.fillText('each crop split across 5 identical segments to balance the ring', pad, y);
   }
 
   function frame(now) {
