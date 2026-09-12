@@ -899,7 +899,7 @@
 
   const ZOOMS = [1, 2, 4, 8, 16, 32, 64];
   const SCALES = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
-  const Z_DEFAULT = 4;                            // ZOOMS[4] = 16x, a regional view
+  const Z_DEFAULT = 3;                            // ZOOMS[3] = 8x, a regional view
   const map = { zi: Z_DEFAULT, lon: null, lat: null };  // lon/lat null = locked on FF1
   let view = null;                               // last drawn frame, read by the drag
   let mapDirty = true, mapDrawn = 0;
