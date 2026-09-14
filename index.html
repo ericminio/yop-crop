@@ -91,6 +91,7 @@
   .dayscale { width: 190px; height: 12px; position: relative; margin-top: 3px;
     font-size: 9.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
   .dayscale > span { position: absolute; top: 0; left: 0; white-space: nowrap; }
+  .dayscale i { font-style: normal; }
 
   .col { z-index: 1; position: absolute; top: 92px; bottom: 186px; display: flex; flex-direction: column;
     gap: 12px; overflow-y: auto; overflow-x: hidden; pointer-events: auto;
@@ -223,8 +224,8 @@
       <div class="daystrip"><div class="mk" id="mkrise"></div><div class="mk" id="mkset"></div>
         <div class="now" id="mknow"></div></div>
       <div class="dayscale" id="dayscale"><span id="risemk"><span id="rise">—</span> ↑</span>
+        <span id="sunmk"><i id="sunlab">sun </i><span id="elev">—</span>°</span>
         <span id="setmk">↓ <span id="set">—</span></span></div>
-      <div class="sub">sun <span id="elev">—</span>°</div>
     </div>
     <div class="cell spacer"></div>
     <div class="tab strip-ttl" id="toptoggle"><span class="chev">▾</span>readouts</div>
@@ -1151,7 +1152,7 @@
   // ==========================================================================
   const el = {};
   ['clock','mday','datestr','latlon','alt','hdg','drift','temp','gband','gneedle','rh',
-   'cloud','vpd','daylen','rise','set','risemk','setmk','dayscale','lstnow','elev','dli','mkrise','mkset','mknow','mass','lift',
+   'cloud','vpd','daylen','rise','set','risemk','setmk','sunmk','sunlab','dayscale','lstnow','elev','dli','mkrise','mkset','mknow','mass','lift',
    'margin','envt','fuel','burn','teth','tilt','lifttag','wres','wdraw','et','wcap','wdays',
    'croplist','candlist','status','cropwhen']
    .forEach(function(id){ el[id] = document.getElementById(id); });
@@ -1233,19 +1234,17 @@
   // costs a layout, so only redo it when the times themselves change - which is
   // once a day, or when a new position fix lands.
   let dayLabelKey = '';
-  function placeDayLabels(riseH, setH) {
+  function placeDayLabels(riseH, setH, elevTxt) {
     const w = el.dayscale.clientWidth;
     const rw = el.risemk.offsetWidth, sw = el.setmk.offsetWidth;
-    if (!w || !rw || !sw) { dayLabelKey = ''; return; }   // cell is hidden; retry
-    const key = riseH.toFixed(4)+'|'+setH.toFixed(4)+'|'+w+'|'+rw+'|'+sw;
+    if (!w || !rw || !sw) { dayLabelKey = ''; return; }
+    const key = riseH.toFixed(4)+'|'+setH.toFixed(4)+'|'+w+'|'+rw+'|'+sw+'|'+elevTxt;
     if (key === dayLabelKey) return;
     dayLabelKey = key;
 
-    let rc = riseH/24 * w, sc = setH/24 * w;              // where the ticks are
-    rc = Math.max(rw/2, Math.min(w - rw/2, rc));          // stay on the strip
+    let rc = riseH/24 * w, sc = setH/24 * w;
+    rc = Math.max(rw/2, Math.min(w - rw/2, rc));
     sc = Math.max(sw/2, Math.min(w - sw/2, sc));
-    // a short night, or a polar day where rise and set collapse onto one tick,
-    // would otherwise stack the two labels on top of each other
     const need = rw/2 + sw/2 + 4;
     if (sc - rc < need) {
       const mid = (rc + sc) / 2;
@@ -1255,6 +1254,21 @@
     }
     el.risemk.style.left = Math.round(rc - rw/2) + 'px';
     el.setmk.style.left = Math.round(sc - sw/2) + 'px';
+
+    const gapL = rc + rw/2, gapR = sc - sw/2;
+    const fits = function (room) {
+      el.sunlab.hidden = false;
+      if (el.sunmk.offsetWidth + 6 <= room) return true;
+      el.sunlab.hidden = true;
+      return el.sunmk.offsetWidth + 6 <= room;
+    };
+    const leftRoom = rc - rw/2, rightRoom = w - (sc + sw/2);
+    let x;
+    if (fits(gapR - gapL)) x = (gapL + gapR)/2 - el.sunmk.offsetWidth/2;
+    else if (rightRoom >= leftRoom) { fits(rightRoom); x = w - el.sunmk.offsetWidth; }
+    else { fits(leftRoom); x = 0; }
+    const uw = el.sunmk.offsetWidth;
+    el.sunmk.style.left = Math.round(Math.max(0, Math.min(w - uw, x))) + 'px';
   }
 
   function updateHUD(st, markDay) {
@@ -1289,7 +1303,7 @@
     el.mkrise.style.left = (st.sun.rise/24*100)+'%';
     el.mkset.style.left = (st.sun.set/24*100)+'%';
     el.mknow.style.left = (st.lst/24*100)+'%';
-    placeDayLabels(st.sun.rise, st.sun.set);
+    placeDayLabels(st.sun.rise, st.sun.set, el.elev.textContent);
 
     const mass = 66.5 + 1.9 + Math.sin(st.missionDay/34)*0.55;
     const gross = 73.5 - (1-sim.fuel)*1.1;
