@@ -1151,6 +1151,10 @@
 
   function hhmm(h){ const H=Math.floor(((h%24)+24)%24), M=Math.floor((h-Math.floor(h))*60);
     return pad2(H)+':'+pad2((M+60)%60); }
+  // a span of hours, never a clock reading: 12:28 in the Daylight cell read as
+  // the time of day, and hhmm wraps at 24 so a polar day came out as 00:00
+  function hours(h){ const t=Math.round(h*60);
+    return Math.floor(t/60)+'h '+pad2(t%60)+'m'; }
   const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const CANDIDATES=[{name:'hold station',brg:'—',dist:0,dt:0.0},
                     {name:'NNE 240 km',brg:'022°',dist:240,dt:-1.4},
@@ -1241,7 +1245,7 @@
     el.rh.textContent = st.rh.toFixed(0);
     el.cloud.textContent = (sim.cloud*100).toFixed(0);
     el.vpd.textContent = st.vpd.toFixed(2);
-    el.daylen.textContent = hhmm(st.sun.dayLen);
+    el.daylen.textContent = hours(st.sun.dayLen);
     el.rise.textContent = hhmm(st.sun.rise);
     el.set.textContent = hhmm(st.sun.set);
     el.lstnow.textContent = hhmm(st.lst);
