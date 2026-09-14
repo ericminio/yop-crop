@@ -86,6 +86,11 @@
     background: var(--ink); opacity: 0.55; }
   .daystrip .now { position: absolute; top: -4px; bottom: -4px; width: 2px;
     background: var(--amber); box-shadow: 0 0 7px var(--amber); }
+  /* rise and set read under their own tick, so the row is the strip's width
+     and placeDayLabels() puts each label where its marker is */
+  .dayscale { width: 190px; height: 12px; position: relative; margin-top: 3px;
+    font-size: 9.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .dayscale > span { position: absolute; top: 0; left: 0; white-space: nowrap; }
 
   .col { z-index: 1; position: absolute; top: 92px; bottom: 186px; display: flex; flex-direction: column;
     gap: 12px; overflow-y: auto; overflow-x: hidden; pointer-events: auto;
@@ -213,11 +218,13 @@
       <div class="sub">cloud <span id="cloud">—</span>% &middot; VPD <span id="vpd">—</span> kPa</div>
     </div>
     <div class="cell opt">
-      <div class="lab">Daylight &middot; LST</div><div class="big" id="daylen">—</div>
+      <div class="lab">Daylight &middot; LST</div>
+      <div class="big"><span style="font-size:11px;color:var(--dim)">length </span><span id="daylen">—</span><span style="font-size:11px;color:var(--dim)"> &middot; DLI <span id="dli">—</span></span></div>
       <div class="daystrip"><div class="mk" id="mkrise"></div><div class="mk" id="mkset"></div>
         <div class="now" id="mknow"></div></div>
-      <div class="sub"><span id="rise">—</span> ↑ &middot; ↓ <span id="set">—</span>
-        &middot; sun <span id="elev">—</span>° &middot; DLI <span id="dli">—</span></div>
+      <div class="dayscale" id="dayscale"><span id="risemk"><span id="rise">—</span> ↑</span>
+        <span id="setmk">↓ <span id="set">—</span></span></div>
+      <div class="sub">sun <span id="elev">—</span>°</div>
     </div>
     <div class="cell spacer"></div>
     <div class="tab strip-ttl" id="toptoggle"><span class="chev">▾</span>readouts</div>
@@ -1144,7 +1151,7 @@
   // ==========================================================================
   const el = {};
   ['clock','mday','datestr','latlon','alt','hdg','drift','temp','gband','gneedle','rh',
-   'cloud','vpd','daylen','rise','set','lstnow','elev','dli','mkrise','mkset','mknow','mass','lift',
+   'cloud','vpd','daylen','rise','set','risemk','setmk','dayscale','lstnow','elev','dli','mkrise','mkset','mknow','mass','lift',
    'margin','envt','fuel','burn','teth','tilt','lifttag','wres','wdraw','et','wcap','wdays',
    'croplist','candlist','status','cropwhen']
    .forEach(function(id){ el[id] = document.getElementById(id); });
@@ -1222,6 +1229,34 @@
     });
   });
 
+  // Put each of rise and set under its own tick on the strip. Reading widths
+  // costs a layout, so only redo it when the times themselves change - which is
+  // once a day, or when a new position fix lands.
+  let dayLabelKey = '';
+  function placeDayLabels(riseH, setH) {
+    const w = el.dayscale.clientWidth;
+    const rw = el.risemk.offsetWidth, sw = el.setmk.offsetWidth;
+    if (!w || !rw || !sw) { dayLabelKey = ''; return; }   // cell is hidden; retry
+    const key = riseH.toFixed(4)+'|'+setH.toFixed(4)+'|'+w+'|'+rw+'|'+sw;
+    if (key === dayLabelKey) return;
+    dayLabelKey = key;
+
+    let rc = riseH/24 * w, sc = setH/24 * w;              // where the ticks are
+    rc = Math.max(rw/2, Math.min(w - rw/2, rc));          // stay on the strip
+    sc = Math.max(sw/2, Math.min(w - sw/2, sc));
+    // a short night, or a polar day where rise and set collapse onto one tick,
+    // would otherwise stack the two labels on top of each other
+    const need = rw/2 + sw/2 + 4;
+    if (sc - rc < need) {
+      const mid = (rc + sc) / 2;
+      rc = mid - need/2; sc = mid + need/2;
+      if (rc < rw/2) { rc = rw/2; sc = rc + need; }
+      if (sc > w - sw/2) { sc = w - sw/2; rc = sc - need; }
+    }
+    el.risemk.style.left = Math.round(rc - rw/2) + 'px';
+    el.setmk.style.left = Math.round(sc - sw/2) + 'px';
+  }
+
   function updateHUD(st, markDay) {
     const d = st.d;
     el.clock.textContent = pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes())+':'+
@@ -1254,6 +1289,7 @@
     el.mkrise.style.left = (st.sun.rise/24*100)+'%';
     el.mkset.style.left = (st.sun.set/24*100)+'%';
     el.mknow.style.left = (st.lst/24*100)+'%';
+    placeDayLabels(st.sun.rise, st.sun.set);
 
     const mass = 66.5 + 1.9 + Math.sin(st.missionDay/34)*0.55;
     const gross = 73.5 - (1-sim.fuel)*1.1;
