@@ -78,6 +78,8 @@
     border-left: 1px solid var(--green); border-right: 1px solid var(--green); }
   .gauge .needle { position: absolute; top: -3px; bottom: -3px; width: 2px;
     background: var(--amber); box-shadow: 0 0 7px var(--amber); }
+  .gauge .ceil { position: absolute; top: -2px; bottom: -2px; width: 1px;
+    background: var(--red); opacity: 0.75; }
   .daystrip { width: 190px; height: 9px; position: relative; margin-top: 5px;
     background: linear-gradient(to right, #0c1c2b, #17334a 12%, #86c6ee 30%, #cfe9f8 50%,
                 #86c6ee 70%, #17334a 88%, #0c1c2b);
@@ -202,12 +204,14 @@
     <div class="cell">
       <div class="lab">Air temperature</div>
       <div class="big"><span id="temp">—</span><span style="font-size:11px;color:var(--dim)"> °C</span></div>
-      <div class="gauge"><div class="band" id="gband"></div><div class="needle" id="gneedle"></div></div>
+      <div class="sub"><span id="trange">—</span> &middot; <span id="gdd">—</span> °Cd/d</div>
+      <div class="gauge"><div class="band" id="gband"></div>
+        <div class="ceil" id="gceil"></div><div class="needle" id="gneedle"></div></div>
     </div>
     <div class="cell opt">
-      <div class="lab">Humidity / cloud</div>
-      <div class="big"><span id="rh">—</span><span style="font-size:11px;color:var(--dim)"> %</span></div>
-      <div class="sub">cloud <span id="cloud">—</span>% &middot; VPD <span id="vpd">—</span> kPa</div>
+      <div class="lab">Evaporative demand</div>
+      <div class="big"><span id="vpd">—</span><span style="font-size:11px;color:var(--dim)"> kPa VPD</span></div>
+      <div class="sub">RH <span id="rh">—</span>% &middot; cloud <span id="cloud">—</span>%</div>
     </div>
     <div class="cell opt">
       <div class="lab">Daylight &middot; LST</div>
@@ -316,34 +320,22 @@
   const CROPS = [
     { name: 'potato', area: 196, depth: 0.45, days: 100, off: 0, rgb: [95,141,62],
       tBase: 7,
-      need: [ {gdd:180, dli: 8, night:[ 8,20], vpd:[0.35,1.10], heat:29, photo:null,
-               t:[15,20], kc:0.50, note:'sprouting'},
-              {gdd:450, dli:20, night:[10,20], vpd:[0.40,1.15], heat:29, photo:null,
-               t:[17,22], kc:0.83, note:'canopy building'},
-              {gdd:600, dli:30, night:[10,18], vpd:[0.45,1.00], heat:27, photo:[0,14],
-               t:[15,19], kc:1.15, note:'tubers filling'},
-              {gdd:200, dli:18, night:[ 8,20], vpd:[0.50,1.40], heat:29, photo:null,
-               t:[15,20], kc:0.75, note:'skin set'} ] },
+      need: [ {gdd:180, dli: 8, night:[ 8,20], vpd:[0.35,1.10], heat:29, photo:null, kc:0.50, note:'sprouting'},
+              {gdd:450, dli:20, night:[10,20], vpd:[0.40,1.15], heat:29, photo:null, kc:0.83, note:'canopy building'},
+              {gdd:600, dli:30, night:[10,18], vpd:[0.45,1.00], heat:27, photo:[0,14], kc:1.15, note:'tubers filling'},
+              {gdd:200, dli:18, night:[ 8,20], vpd:[0.50,1.40], heat:29, photo:null, kc:0.75, note:'skin set'} ] },
     { name: 'tomato', area:  11, depth: 0.45, days: 110, off: 28, rgb: [192,80,64],
       tBase: 10,
-      need: [ {gdd:200, dli: 8, night:[13,22], vpd:[0.40,1.10], heat:32, photo:null,
-               t:[20,25], kc:0.60, note:'transplant'},
-              {gdd:480, dli:22, night:[13,22], vpd:[0.50,1.20], heat:32, photo:null,
-               t:[20,26], kc:0.88, note:'frame building'},
-              {gdd:700, dli:30, night:[15,21], vpd:[0.60,1.10], heat:30, photo:null,
-               t:[18,26], kc:1.15, note:'fruit set and fill'},
-              {gdd:250, dli:20, night:[14,22], vpd:[0.55,1.30], heat:32, photo:null,
-               t:[20,26], kc:0.80, note:'ripening'} ] },
+      need: [ {gdd:200, dli: 8, night:[13,22], vpd:[0.40,1.10], heat:32, photo:null, kc:0.60, note:'transplant'},
+              {gdd:480, dli:22, night:[13,22], vpd:[0.50,1.20], heat:32, photo:null, kc:0.88, note:'frame building'},
+              {gdd:700, dli:30, night:[15,21], vpd:[0.60,1.10], heat:30, photo:null, kc:1.15, note:'fruit set and fill'},
+              {gdd:250, dli:20, night:[14,22], vpd:[0.55,1.30], heat:32, photo:null, kc:0.80, note:'ripening'} ] },
     { name: 'onion',  area:   2, depth: 0.25, days: 100, off: 72, rgb: [185,167,196],
       tBase: 6,
-      need: [ {gdd:200, dli: 8, night:[ 8,20], vpd:[0.35,1.20], heat:30, photo:null,
-               t:[13,22], kc:0.70, note:'rooting'},
-              {gdd:450, dli:18, night:[ 8,20], vpd:[0.40,1.30], heat:30, photo:null,
-               t:[15,24], kc:0.88, note:'leaf building'},
-              {gdd:550, dli:26, night:[10,21], vpd:[0.45,1.30], heat:30, photo:[14,24],
-               t:[18,24], kc:1.05, note:'bulbing'},
-              {gdd:200, dli:16, night:[10,24], vpd:[0.80,2.00], heat:32, photo:null,
-               t:[20,28], kc:0.75, note:'drying down'} ] }
+      need: [ {gdd:200, dli: 8, night:[ 8,20], vpd:[0.35,1.20], heat:30, photo:null, kc:0.70, note:'rooting'},
+              {gdd:450, dli:18, night:[ 8,20], vpd:[0.40,1.30], heat:30, photo:null, kc:0.88, note:'leaf building'},
+              {gdd:550, dli:26, night:[10,21], vpd:[0.45,1.30], heat:30, photo:[14,24], kc:1.05, note:'bulbing'},
+              {gdd:200, dli:16, night:[10,24], vpd:[0.80,2.00], heat:32, photo:null, kc:0.75, note:'drying down'} ] }
   ];
   const TOTAL_AREA = CROPS.reduce(function (s, c) { return s + c.area; }, 0);
   const ROCK_DARK = [70,58,48], BALLOON_COLOR = [226,196,74];
@@ -1215,7 +1207,8 @@
   });
 
   const el = {};
-  ['clock','mday','datestr','latlon','alt','hdg','drift','temp','gband','gneedle','rh',
+  ['clock','mday','datestr','latlon','alt','hdg','drift','temp','gband','gceil','gneedle',
+   'trange','gdd','rh',
    'cloud','vpd','daylen','rise','set','risemk','setmk','sunmk','sunlab','dayscale','lstnow','elev','dli','mkrise','mkset','mknow','mass','lift',
    'margin','envt','fuel','burn','teth','tilt','lifttag','wres','wdraw','et','wcap','wdays',
    'croplist','candlist','status','cropwhen']
@@ -1370,15 +1363,21 @@
 
     const scored = CROPS[SCORE_CROP], scyc = cycleAt(scored, st.missionDay);
     const sph = scyc.idx < 0 ? null : scored.need[scyc.idx];
-    const lo = sph ? sph.t[0] : 15, hi = sph ? sph.t[1] : 25;
+    const night = sph ? sph.night : [10,20], ceil = sph ? sph.heat : 30;
+    const sax = axesOf(st.wx, scored);
 
     el.temp.textContent = st.temp.toFixed(1);
-    const pc = t => ((t-8)/24)*100;
-    el.gband.style.left = pc(lo)+'%';
-    el.gband.style.width = (pc(hi)-pc(lo))+'%';
-    el.gneedle.style.left = Math.max(0,Math.min(100,pc(st.temp)))+'%';
-    const inBand = st.temp >= lo && st.temp <= hi;
+    const pc = t => Math.max(0, Math.min(100, ((t-8)/24)*100));
+    el.gband.style.left = pc(night[0])+'%';
+    el.gband.style.width = (pc(night[1])-pc(night[0]))+'%';
+    el.gceil.style.left = pc(ceil)+'%';
+    el.gneedle.style.left = pc(st.temp)+'%';
+    el.trange.textContent = sax.nightMin.toFixed(1)+' / '+sax.dayMax.toFixed(1)+' °C';
+    el.gdd.textContent = sax.gddRate.toFixed(1);
+    const inBand = sax.nightMin >= night[0] && sax.nightMin <= night[1] &&
+                   sax.dayMax <= ceil;
     el.temp.style.color = inBand ? 'var(--green)' : 'var(--amber)';
+    el.trange.style.color = inBand ? 'var(--dim)' : 'var(--amber)';
 
     el.rh.textContent = st.rh.toFixed(0);
     el.cloud.textContent = st.wx.cloud_cover.toFixed(0);
