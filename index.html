@@ -295,6 +295,9 @@
         <span><i style="background:#b9a63c"></i>bulking</span>
         <span><i style="background:#c8663c"></i>mature</span>
         <span><i style="background:#2a3d4d"></i>turnaround</span>
+        <span style="margin-left:12px"><i style="background:rgba(215,242,255,0.85)"></i>measured</span>
+        <span><i style="background:rgba(215,242,255,0.42)"></i>forecast</span>
+        <span><i style="background:rgba(215,242,255,0.16)"></i>projected</span>
         <button id="nowbtn">back to now</button>
       </span>
     </div>
@@ -340,7 +343,8 @@
   const TOTAL_AREA = CROPS.reduce(function (s, c) { return s + c.area; }, 0);
   const ROCK_DARK = [70,58,48], BALLOON_COLOR = [226,196,74];
 
-  const LAUNCH = Date.UTC(2026, 2, 14, 6, 0);
+  const LAUNCH = Date.UTC(2026, 8, 10, 6, 0);
+  const FORECAST_DAYS = 16;
   const sim = { lat: 0, lon: 0, alt: 2, hdg: 68, drift: 17,
                 fuel: 0.62, cloud: 0.22, water: 9.6 };
   let scrub = null;
@@ -387,6 +391,10 @@
   const simulatedWeather = {
     name: 'simulated',
     prime: function () {},
+    horizonAt: function (lat, lon, when, now) {
+      return when <= now ? 'measured'
+           : when <= now + FORECAST_DAYS * 86400000 ? 'forecast' : 'climatology';
+    },
     at: function (latDeg, lonDeg, when) {
       const solarMs = when + lonDeg / 15 * 3600000;
       const doy = doyOf(solarMs);
@@ -447,7 +455,7 @@
     cache: new Map(),
     pending: false,
     key: function (lat, lon) { return lat.toFixed(2) + ',' + lon.toFixed(2); },
-    prime: function (points) {
+    prime: function (points, pastDays) {
       if (this.pending) return;
       const self = this;
       const miss = points.filter(function (pt) {
@@ -455,12 +463,14 @@
       });
       if (!miss.length) return;
       this.pending = true;
+      const back = Math.max(1, Math.min(92, Math.ceil(pastDays || 1)));
       fetch(this.endpoint +
         '?latitude=' + miss.map(function (pt) { return pt.lat.toFixed(4); }).join(',') +
         '&longitude=' + miss.map(function (pt) { return pt.lon.toFixed(4); }).join(',') +
         '&hourly=' + this.hourly.join(',') +
         '&daily=' + this.daily.join(',') +
-        '&forecast_days=16&timeformat=unixtime&timezone=UTC')
+        '&past_days=' + back +
+        '&forecast_days=' + FORECAST_DAYS + '&timeformat=unixtime&timezone=UTC')
         .then(function (r) { return r.json(); })
         .then(function (body) {
           const rows = Array.isArray(body) ? body : [body];
@@ -472,9 +482,18 @@
         })
         .catch(function () { self.pending = false; });
     },
+    covers: function (row, when) {
+      const t = row.daily.time, sec = when / 1000;
+      return sec >= t[0] && sec < t[t.length - 1] + 86400;
+    },
+    horizonAt: function (lat, lon, when, now) {
+      const row = this.cache.get(this.key(lat, lon));
+      if (!row || !this.covers(row, when)) return 'climatology';
+      return when <= now ? 'measured' : 'forecast';
+    },
     at: function (lat, lon, when) {
       const row = this.cache.get(this.key(lat, lon));
-      if (!row) return simulatedWeather.at(lat, lon, when);
+      if (!row || !this.covers(row, when)) return simulatedWeather.at(lat, lon, when);
       const sec = when / 1000;
       const h = nearestIndex(row.hourly.time, sec);
       const d = nearestIndex(row.daily.time, sec);
@@ -532,20 +551,62 @@
              dli: wx.shortwave_radiation_sum * PAR_PER_MJ };
   }
 
-  function cycleAt(c, day) {
-    const period = c.days + TURNAROUND;
-    const pos = ((day - c.off) % period + period) % period;
-    if (pos >= c.days) return { idx: -1, phase: 'turnaround', progress: 1,
-                                toHarvest: Math.ceil(period - pos + c.days) };
-    let acc = 0, idx = 0;
-    for (let i = 0; i < SPLIT.length; i++) {
-      acc += SPLIT[i] * c.days;
-      if (pos < acc) { idx = i; break; }
-      idx = i;
+  function dayMs(missionDay) { return LAUNCH + missionDay * 86400000; }
+
+  function buildTrack(c, lat, lon, endDay) {
+    const segs = [];
+    let day = c.off;
+    if (day > 0) segs.push({ from: 0, to: day, idx: -2 });
+    let guard = 0;
+    while (day < endDay && guard < 20000) {
+      let acc = 0, idx = 0, from = day;
+      while (idx < c.need.length && day < endDay && guard++ < 20000) {
+        const wx = weather.at(lat, lon, dayMs(day));
+        acc += Math.max(0, (wx.temperature_2m_max + wx.temperature_2m_min) / 2 - c.tBase);
+        day += 1;
+        if (acc >= c.need[idx].gdd) {
+          acc -= c.need[idx].gdd;
+          segs.push({ from: from, to: day, idx: idx });
+          idx++; from = day;
+        }
+      }
+      if (idx < c.need.length) { segs.push({ from: from, to: endDay, idx: idx, open: true }); break; }
+      segs.push({ from: day, to: day + TURNAROUND, idx: -1 });
+      day += TURNAROUND;
     }
-    return { idx: idx, phase: PHASES[idx], progress: pos / c.days,
-             phaseDays: SPLIT[idx] * c.days,
-             toHarvest: Math.ceil(c.days - pos) };
+    return segs;
+  }
+
+  const devel = { key: null, tracks: null };
+
+  function tracksFor(lat, lon, missionDay, endDay) {
+    const primed = weather.cache ? weather.cache.size : 0;
+    const key = [weather.name, primed, lat.toFixed(2), lon.toFixed(2),
+                 Math.floor(missionDay), Math.ceil(endDay)].join('|');
+    if (devel.key !== key) {
+      devel.key = key;
+      devel.tracks = CROPS.map(function (c) { return buildTrack(c, lat, lon, endDay); });
+    }
+    return devel.tracks;
+  }
+
+  function phaseAt(track, day) {
+    for (let i = 0; i < track.length; i++) {
+      const sg = track[i];
+      if (day < sg.from || day >= sg.to) continue;
+      let harvest = null;
+      if (sg.idx >= 0) {
+        for (let k = i; k < track.length; k++)
+          if (track[k].idx === -1) { harvest = track[k].from; break; }
+      }
+      return { idx: sg.idx, open: !!sg.open,
+               phase: sg.idx >= 0 ? PHASES[sg.idx]
+                    : sg.idx === -1 ? 'turnaround' : 'not sown',
+               phaseDays: sg.to - sg.from,
+               nextAt: sg.to,
+               toHarvest: harvest === null ? null : Math.ceil(harvest - day) };
+    }
+    return null;
   }
 
   const canvas = document.getElementById('scene');
@@ -739,6 +800,14 @@
   }
 
   const tlc = document.getElementById('tlcanvas'), tctx = tlc.getContext('2d');
+  const hatch = (function () {
+    const c = document.createElement('canvas'); c.width = c.height = 6;
+    const g = c.getContext('2d');
+    g.strokeStyle = 'rgba(215,242,255,0.20)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(-1,7); g.lineTo(7,-1); g.stroke();
+    g.beginPath(); g.moveTo(2,10); g.lineTo(10,2); g.stroke();
+    return tctx.createPattern(c, 'repeat');
+  })();
   const nowBtn = document.getElementById('nowbtn');
   const BACK = 35, FWD = 105;
   let geom = null;
@@ -750,13 +819,13 @@
     tctx.setTransform(dpr,0,0,dpr,0,0);
   }
 
-  function drawTimeline(st, markDay) {
+  function drawTimeline(st, markDay, tracks) {
     const r = tlc.getBoundingClientRect(), W = r.width, H = r.height;
     if (W < 2) return;
     tctx.clearRect(0,0,W,H);
     const padL = Math.min(88, W*0.16), padR = 14, padT = 16, padB = 20;
     const plotW = W - padL - padR, rowH = (H - padT - padB) / CROPS.length;
-    const day0 = st.missionDay - BACK, span = BACK + FWD;
+    const day0 = Math.max(0, st.missionDay - BACK), span = BACK + FWD;
     const X = d => padL + (d - day0)/span * plotW;
     geom = { padL: padL, plotW: plotW, day0: day0, span: span };
 
@@ -777,30 +846,49 @@
       tctx.fillStyle='rgba(215,242,255,0.9)'; tctx.textAlign='left'; tctx.textBaseline='middle';
       tctx.fillText(c.name, 22, by+bh/2);
 
-      const period = c.days + TURNAROUND;
-      for (let k = Math.floor((day0-c.off)/period)-1; ; k++) {
-        const start = c.off + k*period;
-        if (start > day0+span) break;
-        if (start + period < day0) continue;
-        let acc = start;
-        for (let p = 0; p < SPLIT.length; p++) {
-          const len = SPLIT[p]*c.days, x0 = X(acc), x1 = X(acc+len);
-          if (x1 > padL && x0 < padL+plotW) {
-            tctx.fillStyle = PH_CSS[p];
-            const a=Math.max(padL,x0), b=Math.min(padL+plotW,x1);
-            tctx.fillRect(a, by, Math.max(0.6,b-a), bh);
+      const nowD = st.missionDay, horizD = st.missionDay + FORECAST_DAYS;
+      const cuts = [[-1e9, nowD, 1], [nowD, horizD, 0.5], [horizD, 1e9, 0.18]];
+      const track = tracks[i];
+      for (let k = 0; k < track.length; k++) {
+        const sg = track[k];
+        if (sg.idx === -2 || sg.to < day0 || sg.from > day0 + span) continue;
+        const css = sg.idx === -1 ? '#2a3d4d' : PH_CSS[sg.idx];
+        for (let z = 0; z < cuts.length; z++) {
+          const f = Math.max(sg.from, cuts[z][0]), t = Math.min(sg.to, cuts[z][1]);
+          if (t <= f) continue;
+          const a = Math.max(padL, X(f)), b = Math.min(padL + plotW, X(t));
+          if (b <= a) continue;
+          tctx.globalAlpha = cuts[z][2];
+          tctx.fillStyle = css;
+          tctx.fillRect(a, by, Math.max(0.6, b - a), bh);
+          if (cuts[z][2] < 0.2 && hatch) {
+            tctx.globalAlpha = 1;
+            tctx.fillStyle = hatch;
+            tctx.fillRect(a, by, Math.max(0.6, b - a), bh);
           }
-          acc += len;
         }
-        const g0=X(acc), g1=X(acc+TURNAROUND);
-        if (g1 > padL && g0 < padL+plotW) { tctx.fillStyle='#2a3d4d';
-          const a=Math.max(padL,g0), b=Math.min(padL+plotW,g1);
-          tctx.fillRect(a,by,Math.max(0.6,b-a),bh); }
-        const hx = X(start + c.days);
-        if (hx > padL && hx < padL+plotW) { tctx.fillStyle='#ffd98a';
-          tctx.beginPath(); tctx.moveTo(hx,by-3); tctx.lineTo(hx-3.5,by-8.5);
-          tctx.lineTo(hx+3.5,by-8.5); tctx.closePath(); tctx.fill(); }
+        tctx.globalAlpha = 1;
+        if (sg.idx === 3 && !sg.open) {
+          const hx = X(sg.to);
+          if (hx > padL && hx < padL + plotW) {
+            tctx.fillStyle = sg.to <= horizD ? '#ffd98a' : 'rgba(255,217,138,0.35)';
+            tctx.beginPath(); tctx.moveTo(hx, by-3); tctx.lineTo(hx-3.5, by-8.5);
+            tctx.lineTo(hx+3.5, by-8.5); tctx.closePath(); tctx.fill();
+          }
+        }
       }
+    }
+
+    const hx2 = X(st.missionDay + FORECAST_DAYS);
+    if (hx2 > padL && hx2 < padL + plotW) {
+      tctx.save();
+      tctx.strokeStyle = 'rgba(111,224,255,0.35)'; tctx.lineWidth = 1;
+      tctx.setLineDash([2,3]);
+      tctx.beginPath(); tctx.moveTo(hx2, padT-6); tctx.lineTo(hx2, H-padB+3); tctx.stroke();
+      tctx.restore();
+      tctx.fillStyle = 'rgba(122,163,184,0.85)'; tctx.textAlign = 'left';
+      tctx.textBaseline = 'top'; tctx.font = '8.5px ui-monospace, Menlo, monospace';
+      tctx.fillText('projected', hx2 + 3, padT - 14);
     }
 
     if (scrub !== null) {
@@ -1286,10 +1374,16 @@
 
   const WEIGHT = { gdd:26, night:22, light:24, vpd:16, heat:12, photo:20 };
 
-  function fitScore(wx, crop, ph, daysLeft) {
-    const a = axesOf(wx, crop), rate = ph.gdd / Math.max(1, daysLeft);
+  function projectedDays(ph, crop, wx) {
+    const rate = axesOf(wx, crop).gddRate;
+    return rate <= 0.05 ? Infinity : ph.gdd / rate;
+  }
+
+  function fitScore(wx, crop, ph, refDays) {
+    const a = axesOf(wx, crop);
+    const over = Math.min(1, Math.max(0, (projectedDays(ph, crop, wx) - refDays) / refDays));
     let miss = 0;
-    miss += WEIGHT.gdd   * shortOf(a.gddRate, rate, rate * 0.6);
+    miss += WEIGHT.gdd   * over;
     miss += WEIGHT.night * bandMiss(a.nightMin, ph.night[0], ph.night[1], 4);
     miss += WEIGHT.light * shortOf(a.dli, ph.dli, ph.dli * 0.5);
     miss += WEIGHT.vpd   * bandMiss(a.vpd, ph.vpd[0], ph.vpd[1], 0.6);
@@ -1349,7 +1443,7 @@
     el.sunmk.style.left = Math.round(Math.max(0, Math.min(w - uw, x))) + 'px';
   }
 
-  function updateHUD(st, markDay) {
+  function updateHUD(st, markDay, tracks) {
     const d = st.d;
     el.clock.textContent = pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes())+':'+
                            pad2(d.getUTCSeconds())+' UTC';
@@ -1361,8 +1455,10 @@
     el.hdg.textContent = pad2(Math.round(sim.hdg))+'°';
     el.drift.textContent = sim.drift.toFixed(0)+' km/h';
 
-    const scored = CROPS[SCORE_CROP], scyc = cycleAt(scored, st.missionDay);
+    const scored = CROPS[SCORE_CROP];
+    const scyc = phaseAt(tracks[SCORE_CROP], st.missionDay) || { idx: -2 };
     const sph = scyc.idx < 0 ? null : scored.need[scyc.idx];
+    const sRef = scyc.idx < 0 ? 1 : SPLIT[scyc.idx] * scored.days;
     const night = sph ? sph.night : [10,20], ceil = sph ? sph.heat : 30;
     const sax = axesOf(st.wx, scored);
 
@@ -1409,8 +1505,8 @@
 
     let draw = 0;
     for (let i = 0; i < CROPS.length; i++) {
-      const cy = cycleAt(CROPS[i], st.missionDay);
-      if (cy.idx >= 0) draw += CROPS[i].area * CROPS[i].need[cy.idx].kc * st.et0;
+      const cy = phaseAt(tracks[i], st.missionDay);
+      if (cy && cy.idx >= 0) draw += CROPS[i].area * CROPS[i].need[cy.idx].kc * st.et0;
     }
     draw /= 1000;
     el.wres.textContent = sim.water.toFixed(1)+' t';
@@ -1425,12 +1521,15 @@
     el.cropwhen.textContent = Math.abs(off) < 0.5 ? 'now'
       : (off > 0 ? '+' : '') + off.toFixed(0) + ' d';
     for (let i = 0; i < CROPS.length; i++) {
-      const c = CROPS[i], cy = cycleAt(c, markDay), E = cropEls[i];
+      const c = CROPS[i], cy = phaseAt(tracks[i], markDay) || { idx: -2, phase: 'not sown' };
+      const E = cropEls[i];
       E.ph.textContent = cy.phase;
-      E.dd.textContent = cy.toHarvest;
+      E.dd.textContent = cy.toHarvest === null || cy.toHarvest === undefined
+        ? '—' : cy.toHarvest;
       if (cy.idx < 0) {
         E.root.classList.add('idle');
-        E.note.textContent = 'bed empty, being turned round';
+        E.note.textContent = cy.idx === -1 ? 'bed empty, being turned round'
+                                           : 'not sown yet';
         for (let j = 0; j < NEED_ROWS.length; j++) {
           E.rows[j].style.display = j === PHOTO_ROW ? 'none' : '';
           setNeed(E, j, '—', '—', ['idle','']);
@@ -1441,10 +1540,12 @@
       const n = c.need[cy.idx], a = axesOf(st.wx, c);
       E.note.textContent = n.note;
 
-      const rate = n.gdd / cy.phaseDays;
-      const gS = a.gddRate >= rate ? ['ok','ok']
-               : a.gddRate >= rate*0.7 ? ['slow','warn'] : ['stalled','bad'];
-      setNeed(E, 0, rate.toFixed(1)+' °Cd/d', a.gddRate.toFixed(1), gS);
+      const ref = SPLIT[cy.idx] * c.days, proj = cy.phaseDays;
+      const gS = cy.open ? ['stalled','bad']
+               : proj <= ref*1.1 ? ['ok','ok']
+               : proj <= ref*1.5 ? ['slow','warn'] : ['stalled','bad'];
+      setNeed(E, 0, ref.toFixed(0)+' d planned',
+              (cy.open ? '>' : '') + proj.toFixed(0)+' d', gS);
 
       setNeed(E, 1, n.night[0]+'–'+n.night[1]+' °C', a.nightMin.toFixed(1),
               bandStatus(a.nightMin, n.night[0], n.night[1], 3, ['cold','hot']));
@@ -1472,7 +1573,7 @@
       const eta = cd.dist / Math.max(1, sim.drift);
       const wx = weather.at(sim.lat + cd.dLat, sim.lon + cd.dLon,
                             st.now + eta * 3600000);
-      const sc = sph ? fitScore(wx, scored, sph, scyc.phaseDays) : 0;
+      const sc = sph ? fitScore(wx, scored, sph, sRef) : 0;
       if (sc > best) { best = sc; bi = i; }
       candEls[i].sc.textContent = sc.toFixed(0);
       candEls[i].sc.style.color = sc>=88?'var(--green)':sc>=65?'var(--amber)':'var(--red)';
@@ -1495,7 +1596,7 @@
     const st = readState();
     const markDay = scrub === null ? st.missionDay : scrub;
     sim.cloud = st.wx.cloud_cover / 100;
-    weather.prime(scoringPoints());
+    weather.prime(scoringPoints(), st.missionDay + 2);
     sim.hdg = 60 + Math.sin(st.missionDay/4.1)*22;
     sim.drift = 14 + Math.sin(st.missionDay/2.7)*7;
 
@@ -1510,8 +1611,10 @@
       else if (k === 'cable') drawCable(items[i]);
       else drawBalloon(items[i], k0, glow);
     }
-    updateHUD(st, markDay);
-    drawTimeline(st, markDay);
+    const endDay = Math.max(0, st.missionDay - BACK) + BACK + FWD;
+    const tracks = tracksFor(sim.lat, sim.lon, st.missionDay, endDay);
+    updateHUD(st, markDay, tracks);
+    drawTimeline(st, markDay, tracks);
     maybeDrawMap(now);
     requestAnimationFrame(frame);
   }
