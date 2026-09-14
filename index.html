@@ -68,7 +68,7 @@
               white-space: nowrap; }
   #top .sub { font-size: 9.5px; color: var(--dim); margin-top: 2px; white-space: nowrap; }
   #ident .big { color: var(--cyan); letter-spacing: 0.06em; }
-  #top .spacer { flex: 1; border-right: 0; }
+  #top .spacer { flex: 1; border-right: 0; padding: 0; }
   .chip { display: inline-block; padding: 1px 6px; border: 1px solid currentColor;
     font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase; }
 
@@ -86,6 +86,10 @@
     background: var(--ink); opacity: 0.55; }
   .daystrip .now { position: absolute; top: -4px; bottom: -4px; width: 2px;
     background: var(--amber); box-shadow: 0 0 7px var(--amber); }
+  .dayscale { width: 190px; height: 12px; position: relative; margin-top: 3px;
+    font-size: 9.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .dayscale > span { position: absolute; top: 0; left: 0; white-space: nowrap; }
+  .dayscale i { font-style: normal; }
 
   .col { z-index: 1; position: absolute; top: 92px; bottom: 186px; display: flex; flex-direction: column;
     gap: 12px; overflow-y: auto; overflow-x: hidden; pointer-events: auto;
@@ -96,18 +100,13 @@
     width: clamp(280px, calc(100vw - var(--colw) - var(--colrw) - 52px), var(--mapw)); }
   #colR { right: 14px; width: var(--colrw); }
   .col > .panel { flex: 0 0 auto; }
-  /* the map column holds nothing else, so the map takes all of it */
   #colM > #position { flex: 1 1 auto; min-height: 168px;
     display: flex; flex-direction: column; }
   #colM > #position.collapsed { flex: 0 0 auto; min-height: 0; }
   #position .body { flex: 1 1 auto; min-height: 0; display: flex;
     flex-direction: column; }
-  /* this rule carries an id, so it outranks .panel.collapsed .body and has to
-     say the collapsed case itself or the map stays up with the panel shut */
   #position.collapsed .body { display: none; }
 
-  /* world map. Its column sits over the vehicle, which is what it is for:
-     the scene is scenery, this is the fix. */
   .mapwrap { position: relative; flex: 1 1 auto; min-height: 0; }
   #mapcanvas { display: block; width: 100%; height: 100%; cursor: grab;
     background: #051119; border: 1px solid rgba(111,224,255,0.18); }
@@ -126,7 +125,6 @@
     border: 1px solid var(--amber); visibility: hidden; }
   #recentre:hover { background: rgba(255,200,97,0.15); }
 
-  /* crop needs blocks */
   .crop { padding: 6px 0 7px; border-bottom: 1px solid rgba(111,224,255,0.09); }
   .crop:last-child { border-bottom: 0; }
   .crop .hd { display: grid; grid-template-columns: 9px 1fr auto auto; gap: 7px;
@@ -176,7 +174,6 @@
   @media (max-width: 1120px) { :root { --colw: 198px; --colrw: 268px; } }
   @media (max-width: 940px) { #colL { display: none; } #top .cell.opt { display: none; }
     #colM { left: 14px; } }
-  /* below this the map column would run into the right-hand one */
   @media (max-width: 700px) { #colM { display: none; } }
   @media (max-width: 640px) { #colR { left: 14px; right: 14px; width: auto; }
     #tl { height: 150px; } #tlcanvas { height: 116px; } }
@@ -195,7 +192,8 @@
     </div>
     <div class="cell">
       <div class="lab">Mission clock</div><div class="big" id="clock">--:--:--</div>
-      <div class="sub">day <span id="mday">—</span> &middot; <span id="datestr">—</span></div>
+      <div class="sub">day <span id="mday">—</span> &middot; <span id="datestr">—</span>
+        &middot; <span id="lstnow">—</span> LST</div>
     </div>
     <div class="cell">
       <div class="lab">Position</div><div class="big" id="latlon">—</div>
@@ -212,11 +210,13 @@
       <div class="sub">cloud <span id="cloud">—</span>% &middot; VPD <span id="vpd">—</span> kPa</div>
     </div>
     <div class="cell opt">
-      <div class="lab">Daylight</div><div class="big" id="daylen">—</div>
+      <div class="lab">Daylight &middot; LST</div>
+      <div class="big"><span style="font-size:11px;color:var(--dim)">length </span><span id="daylen">—</span><span style="font-size:11px;color:var(--dim)"> &middot; DLI <span id="dli">—</span></span></div>
       <div class="daystrip"><div class="mk" id="mkrise"></div><div class="mk" id="mkset"></div>
         <div class="now" id="mknow"></div></div>
-      <div class="sub"><span id="rise">—</span> ↑ &middot; ↓ <span id="set">—</span>
-        &middot; sun <span id="elev">—</span>° &middot; DLI <span id="dli">—</span></div>
+      <div class="dayscale" id="dayscale"><span id="risemk"><span id="rise">—</span> ↑</span>
+        <span id="sunmk"><i id="sunlab">sun </i><span id="elev">—</span>°</span>
+        <span id="setmk">↓ <span id="set">—</span></span></div>
     </div>
     <div class="cell spacer"></div>
     <div class="tab strip-ttl" id="toptoggle"><span class="chev">▾</span>readouts</div>
@@ -302,23 +302,13 @@
 (function () {
   'use strict';
 
-  // ==========================================================================
-  // FF1: a 4 m wide ring carrying 209 m2 of bed, lifted by five 49,500 m3
-  // envelopes standing off 39 m so they do not eclipse the crops. Losing
-  // sunflower's 60 cm bed took 3 t off the deck, which shrank the envelopes,
-  // which pulled the standoff in (they pack closer) and the tethers nearer
-  // vertical, which took off more lift still: 77.5 t gross became 73.5.
-  // ==========================================================================
   const R_OUT = 10.32, R_IN = 6.32;
   const BALLOON_R = 22.8, STANDOFF = 38.8, LIFT_H = 60.0, BALLOONS = 5;
   const SUBDIV = 4, RING_PHASE = (9 * Math.PI) / 180;
   const TARGET_LO = 18, TARGET_HI = 20;
   const TURNAROUND = 10;
-  const ET0_REF = 4.5;                    // mm/day reference ET in the 18-20 band
+  const ET0_REF = 4.5;
 
-  // Phase-specific needs. temp is what the crop wants in THAT phase (not the
-  // whole-crop optimum), kc is the FAO-56 crop coefficient, dli the daily light
-  // integral in mol/m2/day the phase can actually use.
   const PHASES = ['establish', 'vegetative', 'bulking', 'mature'];
   const SPLIT = [0.15, 0.35, 0.35, 0.15];
   const PH_CSS = ['#3f6f8c', '#3f9c6b', '#b9a63c', '#c8663c'];
@@ -343,26 +333,25 @@
   const TOTAL_AREA = CROPS.reduce(function (s, c) { return s + c.area; }, 0);
   const ROCK_DARK = [70,58,48], BALLOON_COLOR = [226,196,74];
 
-  // ==========================================================================
-  // state: the mission clock is real wall time; conditions are modelled
-  // ==========================================================================
-  const LAUNCH = Date.UTC(2026, 2, 14, 6, 0);      // 14 Mar 2026
-  // lat/lon start on the null island and askPosition() replaces them with the
-  // browser's own fix when it can get one. Everything downstream follows,
-  // sunrise included.
+  const LAUNCH = Date.UTC(2026, 2, 14, 6, 0);
   const sim = { lat: 0, lon: 0, alt: 1180, hdg: 68, drift: 17,
                 fuel: 0.62, cloud: 0.22, water: 9.6 };
-  let scrub = null;                                 // mission-day float, or null = now
+  let scrub = null;
 
   const D = Math.PI / 180;
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
-  function solar(latDeg, doy, hours) {
+  function localSolar(utcHours, lonDeg) {
+    const t = utcHours + lonDeg / 15;
+    return ((t % 24) + 24) % 24;
+  }
+
+  function solar(latDeg, doy, lstHours) {
     const decl = 23.45 * D * Math.sin(2 * Math.PI * (284 + doy) / 365);
     const lat = latDeg * D;
     let cosH = Math.max(-1, Math.min(1, -Math.tan(lat) * Math.tan(decl)));
     const H = Math.acos(cosH), dayLen = (2 * H / Math.PI) * 12;
-    const ha = (hours - 12) * 15 * D;
+    const ha = (lstHours - 12) * 15 * D;
     const elev = Math.asin(Math.sin(lat)*Math.sin(decl) +
                            Math.cos(lat)*Math.cos(decl)*Math.cos(ha)) / D;
     const noon = Math.asin(Math.sin(lat)*Math.sin(decl) +
@@ -374,26 +363,25 @@
   function readState() {
     const now = Date.now();
     const d = new Date(now);
-    const hours = d.getUTCHours() + d.getUTCMinutes()/60 + d.getUTCSeconds()/3600;
-    const doy = Math.floor((now - Date.UTC(d.getUTCFullYear(), 0, 0)) / 86400000);
+    const utcHours = d.getUTCHours() + d.getUTCMinutes()/60 + d.getUTCSeconds()/3600;
+    const solarNow = now + sim.lon / 15 * 3600000;
+    const sd = new Date(solarNow);
+    const doy = Math.floor((solarNow - Date.UTC(sd.getUTCFullYear(), 0, 0)) / 86400000);
     const missionDay = (now - LAUNCH) / 86400000;
-    const s = solar(sim.lat, doy, hours);
+    const solarHours = localSolar(utcHours, sim.lon);
+    const s = solar(sim.lat, doy, solarHours);
 
     const mean = 19.1 + Math.sin(missionDay / 11) * 1.15;
-    const swing = 3.4 * Math.max(0, Math.sin((hours - 9.2)/24*2*Math.PI + 0.6));
+    const swing = 3.4 * Math.max(0, Math.sin((solarHours - 9.2)/24*2*Math.PI + 0.6));
     const temp = mean - 1.9 + swing;
-    const rh = Math.max(28, Math.min(96, 74 - (temp - 17)*4.1 + Math.sin(hours/3.1)*5));
+    const rh = Math.max(28, Math.min(96, 74 - (temp - 17)*4.1 + Math.sin(solarHours/3.1)*5));
     const svp = 0.6108 * Math.exp(17.27*temp/(temp + 237.3));
     const vpd = svp * (1 - rh/100);
-    // daily light integral, mol/m2/day, from sun angle and cloud
     const clear = 28 * Math.max(0, Math.sin(s.noon * D)) * (s.dayLen / 12) * 2.1;
     const dli = clear * (1 - 0.7 * sim.cloud);
-    // reference ET as a DAILY total, driven by the day's light and humidity.
-    // Taking it from the instantaneous sun angle made it collapse at dawn and
-    // every buffer and days-to-dry figure inflate with it.
     const et0 = Math.max(0.5, Math.min(9, dli * 0.085 * (0.70 + 0.50 * vpd)));
 
-    return { now: now, d: d, hours: hours, doy: doy, missionDay: missionDay,
+    return { now: now, d: d, lst: solarHours, doy: doy, missionDay: missionDay,
              sun: s, temp: temp, rh: rh, vpd: vpd, et0: et0, dli: dli };
   }
 
@@ -412,9 +400,6 @@
              toHarvest: Math.ceil(c.days - pos) };
   }
 
-  // ==========================================================================
-  // scene
-  // ==========================================================================
   const canvas = document.getElementById('scene');
   const ctx = canvas.getContext('2d');
   function normalize(v) { const m = Math.hypot(v[0],v[1],v[2]) || 1;
@@ -434,8 +419,6 @@
     const k=(0.52+0.48*l)*k0;
     return 'rgb('+Math.round(rgb[0]*k)+','+Math.round(rgb[1]*k)+','+Math.round(rgb[2]*k)+')'; }
 
-  // One identical segment per tether, and each segment CENTRED on its balloon,
-  // so a tether hangs over the middle of the crops it carries.
   const SECTORS = (function () {
     const out = []; let a = RING_PHASE - Math.PI/BALLOONS;
     for (let k = 0; k < BALLOONS; k++) {
@@ -484,10 +467,6 @@
     return items;
   }
 
-  // Bound what is actually painted, not an approximation of it. The envelope
-  // bezier peaks 0.8875 r above its centre, the basket hangs 1.86 r below, and
-  // the whole vehicle bobs +/- BOB. Guessed pads left slack under FF1 and it
-  // floated high in the frame.
   const BOB = 0.30;
   const MAXD = CROPS.reduce(function(m,c){ return Math.max(m,c.depth); },0);
   const FIT = (function () {
@@ -495,13 +474,9 @@
     function probe(p,px,pu,pd){ const s=iso(p);
       mnX=Math.min(mnX,s.x-px); mxX=Math.max(mxX,s.x+px);
       mnY=Math.min(mnY,s.y-pu); mxY=Math.max(mxY,s.y+pd); }
-    // the deck is a continuous ring, so sweep it
     for (let i=0;i<360;i++){ const a=(i/360)*Math.PI*2;
-      probe(cyl(R_OUT,a,BOB),0,0,0);                 // deck at its highest
-      probe(cyl(R_OUT,a,-MAXD-BOB),0,0,0); }         // and its lowest
-    // the balloons are FIVE, not a circle. Sweeping the standoff ring reserved
-    // room for a phantom envelope at the nearest bearing, which is what was
-    // pushing FF1 up in the frame.
+      probe(cyl(R_OUT,a,BOB),0,0,0);
+      probe(cyl(R_OUT,a,-MAXD-BOB),0,0,0); }
     for (let i=0;i<BALLOONS;i++){
       const a = RING_PHASE + (i/BALLOONS)*Math.PI*2;
       probe(cyl(STANDOFF,a,LIFT_H+BOB),BALLOON_R,BALLOON_R*0.8875,0);
@@ -517,9 +492,6 @@
     const dpr = window.devicePixelRatio || 1, w = window.innerWidth, h = window.innerHeight;
     canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
-    // Measure the chrome rather than hardcoding it. The timeline's height
-    // changes on a WIDTH media query while the old pads keyed on HEIGHT, so on
-    // a short wide window 18 px of deck sat behind it.
     const topEl = document.getElementById('top'), tlEl = document.getElementById('tl');
     const tab = document.getElementById('toptoggle');
     let topH = topEl ? topEl.getBoundingClientRect().height : 76;
@@ -529,7 +501,6 @@
     const tlH = tlEl ? tlEl.getBoundingClientRect().height : 178;
     const topPad = topH + 8, botPad = tlH + 8;
 
-    // the readouts and the side columns follow the same measurements
     const simEl = document.getElementById('sim');
     if (simEl) simEl.style.bottom = (tlH + 8) + 'px';
     const cols = document.querySelectorAll('.col');
@@ -619,13 +590,10 @@
     ctx.lineWidth=Math.max(1,r*0.015); ctx.stroke();
   }
 
-  // ==========================================================================
-  // timeline, with a draggable now-bar
-  // ==========================================================================
   const tlc = document.getElementById('tlcanvas'), tctx = tlc.getContext('2d');
   const nowBtn = document.getElementById('nowbtn');
   const BACK = 35, FWD = 105;
-  let geom = null;                       // filled by drawTimeline, read by the drag
+  let geom = null;
 
   function sizeTimeline() {
     const dpr = window.devicePixelRatio || 1, r = tlc.getBoundingClientRect();
@@ -687,7 +655,6 @@
       }
     }
 
-    // real now, faint, when the bar has been dragged away from it
     if (scrub !== null) {
       const rx = X(st.missionDay);
       tctx.strokeStyle='rgba(255,200,97,0.30)'; tctx.lineWidth=1;
@@ -695,7 +662,6 @@
       tctx.beginPath(); tctx.moveTo(rx,padT-8); tctx.lineTo(rx,H-padB+2); tctx.stroke();
       tctx.setLineDash([]);
     }
-    // the draggable bar
     const nx = X(markDay);
     tctx.strokeStyle = scrub === null ? '#ffc861' : '#6fe0ff';
     tctx.lineWidth=1.8;
@@ -737,13 +703,6 @@
     scrub = null; nowBtn.style.visibility = 'hidden';
   });
 
-  // ==========================================================================
-  // world map: where FF1 is. Coastlines are Natural Earth 110m land, simplified
-  // to 0.2 deg and quantised to 0.02, delta-encoded as zigzag varints in a
-  // 64-character alphabet so the page stays a single file with no fetches.
-  // Weather layers (temperature, wind, cloud, humidity) go in drawMap, over
-  // the ocean fill and under the coastline: see LAYERS below.
-  // ==========================================================================
   const LAND_DATA = [
     'l6Fj6H5B-CvNIzFiC4NNgEuCmDpB|vxPt4H-FNjIoD+BmB6FPwFhCctB|jtE7zH8DrB6B5EpWjDvLmBSqBqJ8BqH+EoGU2ET|56L1lH6',
     'HC3E7BtHqBWiB2DR|roMzlH4EnBjKqBoCWkDX|p1J5gH8GB6B3BpOC5E8BuKD|91G39GMrBrBtClHfhECwBmBlHZrCcFqByFyB0DDiBq',
@@ -872,9 +831,6 @@
         qx += d[0]; qy += d[1];
         const lat = qy / 50;
         let lon = qx / 50;
-        // Eurasia, Antarctica, Fiji and Wrangel are all stitched across the
-        // antimeridian. Left wrapped, each one draws a band clean across the
-        // map, so unroll the longitudes and repeat the ring every 360 instead.
         if (prev !== null) {
           const step = lon - prev;
           if (step > 180) wrap -= 360; else if (step < -180) wrap += 360;
@@ -899,16 +855,12 @@
 
   const ZOOMS = [1, 2, 4, 8, 16, 32, 64];
   const SCALES = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
-  const Z_DEFAULT = 3;                            // ZOOMS[3] = 8x, a regional view
-  const map = { zi: Z_DEFAULT, lon: null, lat: null };  // lon/lat null = locked on FF1
-  let view = null;                               // last drawn frame, read by the drag
+  const Z_DEFAULT = 3;
+  const map = { zi: Z_DEFAULT, lon: null, lat: null };
+  let view = null;
   let mapDirty = true, mapDrawn = 0;
-  let fixNote = '';                              // why the position is still 0N 0E
+  let fixNote = '';
 
-  // The map takes the height the column has left over, so its box moves
-  // whenever a neighbouring panel collapses or the chrome is re-measured.
-  // Check the box against the bitmap every frame rather than trusting a
-  // one-shot resize: sized once at startup it came out 12 px stale and blurred.
   function sizeMap() {
     const dpr = window.devicePixelRatio || 1, r = mapc.getBoundingClientRect();
     const w = Math.max(1, Math.round(r.width * dpr));
@@ -929,27 +881,20 @@
   function setZoom(i) {
     const n = Math.max(0, Math.min(ZOOMS.length - 1, i));
     if (n === map.zi) return;
-    // zooming out of a pan should not strand the view: once the whole world
-    // fits again there is nowhere to be but centred
     map.zi = n;
     if (n === 0) { map.lon = null; map.lat = null; }
     mapDirty = true; syncMapCtl();
   }
 
-  // Web Mercator. Plate carree makes a world twice as wide as it is tall, and
-  // in a tall column that left a third of the canvas empty above and below it.
-  // Mercator's world is square, so it fills the column, and it is the
-  // projection the weather layers will arrive in.
-  const MERC_LAT = 85.051129;                      // where the square closes
-  function mercY(lat) {                            // degrees -> 0 (N) .. 1 (S)
+  const MERC_LAT = 85.051129;
+  function mercY(lat) {
     const s = Math.sin(Math.max(-MERC_LAT, Math.min(MERC_LAT, lat)) * D);
     return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
   }
-  function mercLat(y) {                            // and back again
+  function mercLat(y) {
     return (2 * Math.atan(Math.exp((0.5 - y) * 2 * Math.PI)) - Math.PI / 2) / D;
   }
 
-  // every label on the map lands on coastline sooner or later, so carry a halo
   function mapLabel(text, x, y, fill) {
     mctx.strokeStyle = 'rgba(5,17,25,0.9)';
     mctx.lineWidth = 2.5; mctx.lineJoin = 'round';
@@ -961,7 +906,6 @@
   function drawMap() {
     const r = mapc.getBoundingClientRect(), W = r.width, H = r.height;
     if (W < 2 || H < 2) return;
-    // the whole world is S x S px; at 1x it fits the short side of the canvas
     const z = ZOOMS[map.zi], S = Math.min(W, H) * z, ppd = S / 360;
     const cLon = map.lon === null ? sim.lon : map.lon;
     const halfN = H / 2 / S;
@@ -978,9 +922,8 @@
     mctx.fillStyle = '#08202f';
     mctx.fillRect(0, Math.max(0, yN), W, Math.min(H, yS) - Math.max(0, yN));
 
-    // --- LAYERS: weather goes here, between the ocean and the coastline ----
 
-    const span = (W / S) * 360;                    // degrees of longitude in view
+    const span = (W / S) * 360;
     const step = span > 170 ? 30 : span > 80 ? 15 : span > 20 ? 5 : span > 6 ? 2 : 1;
     const half = span / 2;
     mctx.lineWidth = 1;
@@ -1013,7 +956,6 @@
     mctx.fillStyle = '#24455b'; mctx.fill('evenodd');
     mctx.strokeStyle = 'rgba(111,224,255,0.40)'; mctx.stroke();
 
-    // the equator, and the band FF1 flies to stay inside
     const yEq = Y(0);
     if (yEq > 0 && yEq < H) {
       mctx.strokeStyle = 'rgba(111,224,255,0.22)';
@@ -1022,7 +964,6 @@
       mctx.setLineDash([]);
     }
 
-    // graticule labels, along the left and bottom edges
     const GRID = 'rgba(151,188,206,0.85)';
     mctx.textBaseline = 'middle'; mctx.textAlign = 'left';
     for (let lat = -90 + step; lat < 90; lat += step) {
@@ -1036,7 +977,6 @@
       mapLabel(Math.abs(w) + (w === 0 ? '' : w > 0 ? 'E' : 'W'), x, H - 3, GRID);
     }
 
-    // FF1, at whichever wrap of its longitude the view is looking at
     let mlon = sim.lon;
     while (mlon - cLon > 180) mlon -= 360;
     while (mlon - cLon < -180) mlon += 360;
@@ -1046,7 +986,6 @@
     mctx.moveTo(0, my); mctx.lineTo(mx - 11, my); mctx.moveTo(mx + 11, my); mctx.lineTo(W, my);
     mctx.moveTo(mx, 0); mctx.lineTo(mx, my - 11); mctx.moveTo(mx, my + 11); mctx.lineTo(mx, H);
     mctx.stroke();
-    // where the wind is taking it, scaled by drift
     const br = sim.hdg * D, arm = 12 + sim.drift * 0.9;
     const ax = mx + Math.sin(br) * arm, ay = my - Math.cos(br) * arm;
     mctx.strokeStyle = 'rgba(111,224,255,0.85)'; mctx.lineWidth = 1.4;
@@ -1065,7 +1004,6 @@
     mctx.textAlign = 'left'; mctx.textBaseline = 'top';
     mapLabel('FF1', mx + 10, my + 6, '#ffc861');
 
-    // scale bar, true at the latitude in the middle of the view
     const kmpp = 40075 * Math.cos(cLat * D) / S;
     let km = SCALES[0];
     for (let i = 0; i < SCALES.length; i++) if (SCALES[i] / kmpp < W * 0.32) km = SCALES[i];
@@ -1087,7 +1025,7 @@
 
   let mapDrag = null;
   function mapGrab(e) {
-    if (mapDirty) { drawMap(); mapDirty = false; }   // never drag on a stale view
+    if (mapDirty) { drawMap(); mapDirty = false; }
     if (!view) return;
     const t = e.touches ? e.touches[0] : e;
     mapDrag = { x: t.clientX, y: t.clientY, lon: view.cLon, cy: view.cy };
@@ -1120,18 +1058,17 @@
     map.lon = null; map.lat = null; mapDirty = true; syncMapCtl();
   });
 
-  // ==========================================================================
-  // HUD
-  // ==========================================================================
   const el = {};
   ['clock','mday','datestr','latlon','alt','hdg','drift','temp','gband','gneedle','rh',
-   'cloud','vpd','daylen','rise','set','elev','dli','mkrise','mkset','mknow','mass','lift',
+   'cloud','vpd','daylen','rise','set','risemk','setmk','sunmk','sunlab','dayscale','lstnow','elev','dli','mkrise','mkset','mknow','mass','lift',
    'margin','envt','fuel','burn','teth','tilt','lifttag','wres','wdraw','et','wcap','wdays',
    'croplist','candlist','status','cropwhen']
    .forEach(function(id){ el[id] = document.getElementById(id); });
 
   function hhmm(h){ const H=Math.floor(((h%24)+24)%24), M=Math.floor((h-Math.floor(h))*60);
     return pad2(H)+':'+pad2((M+60)%60); }
+  function hours(h){ const t=Math.round(h*60);
+    return Math.floor(t/60)+'h '+pad2(t%60)+'m'; }
   const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const CANDIDATES=[{name:'hold station',brg:'—',dist:0,dt:0.0},
                     {name:'NNE 240 km',brg:'022°',dist:240,dt:-1.4},
@@ -1186,7 +1123,6 @@
     return Math.max(0, 96 - d*13);
   }
 
-  // every panel collapses on its own title, the top strip and timeline included
   document.querySelectorAll('.panel .ttl').forEach(function (t) {
     t.addEventListener('click', function () { t.parentNode.classList.toggle('collapsed'); });
   });
@@ -1195,9 +1131,47 @@
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
       box.classList.toggle('collapsed');
-      resize();                       // the sky the scene gets just changed
+      resize();
     });
   });
+
+  let dayLabelKey = '';
+  function placeDayLabels(riseH, setH, elevTxt) {
+    const w = el.dayscale.clientWidth;
+    const rw = el.risemk.offsetWidth, sw = el.setmk.offsetWidth;
+    if (!w || !rw || !sw) { dayLabelKey = ''; return; }
+    const key = riseH.toFixed(4)+'|'+setH.toFixed(4)+'|'+w+'|'+rw+'|'+sw+'|'+elevTxt;
+    if (key === dayLabelKey) return;
+    dayLabelKey = key;
+
+    let rc = riseH/24 * w, sc = setH/24 * w;
+    rc = Math.max(rw/2, Math.min(w - rw/2, rc));
+    sc = Math.max(sw/2, Math.min(w - sw/2, sc));
+    const need = rw/2 + sw/2 + 4;
+    if (sc - rc < need) {
+      const mid = (rc + sc) / 2;
+      rc = mid - need/2; sc = mid + need/2;
+      if (rc < rw/2) { rc = rw/2; sc = rc + need; }
+      if (sc > w - sw/2) { sc = w - sw/2; rc = sc - need; }
+    }
+    el.risemk.style.left = Math.round(rc - rw/2) + 'px';
+    el.setmk.style.left = Math.round(sc - sw/2) + 'px';
+
+    const gapL = rc + rw/2, gapR = sc - sw/2;
+    const fits = function (room) {
+      el.sunlab.hidden = false;
+      if (el.sunmk.offsetWidth + 6 <= room) return true;
+      el.sunlab.hidden = true;
+      return el.sunmk.offsetWidth + 6 <= room;
+    };
+    const leftRoom = rc - rw/2, rightRoom = w - (sc + sw/2);
+    let x;
+    if (fits(gapR - gapL)) x = (gapL + gapR)/2 - el.sunmk.offsetWidth/2;
+    else if (rightRoom >= leftRoom) { fits(rightRoom); x = w - el.sunmk.offsetWidth; }
+    else { fits(leftRoom); x = 0; }
+    const uw = el.sunmk.offsetWidth;
+    el.sunmk.style.left = Math.round(Math.max(0, Math.min(w - uw, x))) + 'px';
+  }
 
   function updateHUD(st, markDay) {
     const d = st.d;
@@ -1222,14 +1196,16 @@
     el.rh.textContent = st.rh.toFixed(0);
     el.cloud.textContent = (sim.cloud*100).toFixed(0);
     el.vpd.textContent = st.vpd.toFixed(2);
-    el.daylen.textContent = hhmm(st.sun.dayLen);
+    el.daylen.textContent = hours(st.sun.dayLen);
     el.rise.textContent = hhmm(st.sun.rise);
     el.set.textContent = hhmm(st.sun.set);
+    el.lstnow.textContent = hhmm(st.lst);
     el.elev.textContent = st.sun.elev.toFixed(0);
     el.dli.textContent = st.dli.toFixed(0);
     el.mkrise.style.left = (st.sun.rise/24*100)+'%';
     el.mkset.style.left = (st.sun.set/24*100)+'%';
-    el.mknow.style.left = (st.hours/24*100)+'%';
+    el.mknow.style.left = (st.lst/24*100)+'%';
+    placeDayLabels(st.sun.rise, st.sun.set, el.elev.textContent);
 
     const mass = 66.5 + 1.9 + Math.sin(st.missionDay/34)*0.55;
     const gross = 73.5 - (1-sim.fuel)*1.1;
@@ -1238,14 +1214,13 @@
     const marg = (gross-mass)/mass*100;
     el.margin.textContent = (marg>=0?'+':'')+marg.toFixed(1)+' %';
     el.margin.className = 'v '+(marg>5?'ok':marg>1?'hi':'no');
-    el.envt.textContent = (108+Math.sin(st.hours/3.3)*5+(19-st.temp)*0.8).toFixed(0)+' °C';
+    el.envt.textContent = (108+Math.sin(st.lst/3.3)*5+(19-st.temp)*0.8).toFixed(0)+' °C';
     el.fuel.textContent = (sim.fuel*100).toFixed(0)+' %';
     el.fuel.className = 'v '+(sim.fuel>0.3?'ok':sim.fuel>0.15?'hi':'no');
     el.burn.textContent = (41+Math.max(0,19-st.temp)*3.2).toFixed(0)+' kg/h';
     el.teth.textContent = '±1.2 %'; el.tilt.textContent = '0.00°';
     el.lifttag.textContent = '5 × 49,500 m³';
 
-    // deck water draw at the phases in play right now
     let draw = 0;
     for (let i = 0; i < CROPS.length; i++) {
       const cy = cycleAt(CROPS[i], st.missionDay);
@@ -1260,7 +1235,6 @@
     el.wdays.textContent = dry.toFixed(1)+' d';
     el.wdays.className = 'v '+(dry>5?'ok':dry>2?'hi':'no');
 
-    // --- crops, read at the timeline bar -----------------------------------
     const off = markDay - st.missionDay;
     el.cropwhen.textContent = Math.abs(off) < 0.5 ? 'now'
       : (off > 0 ? '+' : '') + off.toFixed(0) + ' d';
@@ -1280,22 +1254,19 @@
       const n = c.need[cy.idx];
       E.note.textContent = n.note;
 
-      // temperature
       const tS = st.temp < n.t[0] ? ['cool', st.temp < n.t[0]-3 ? 'bad':'warn']
                : st.temp > n.t[1] ? ['warm', st.temp > n.t[1]+3 ? 'bad':'warn']
                : ['ok','ok'];
       setNeed({want:E.want[0],got:E.got[0],st:E.st[0]},
               n.t[0]+'–'+n.t[1]+' °C', st.temp.toFixed(1), tS);
 
-      // water: what this phase draws, against what its own bed depth buffers
       const mmd = n.kc * st.et0;
-      const buffer = c.depth * 120;                   // readily available water, mm
+      const buffer = c.depth * 120;
       const days = buffer / Math.max(0.1, mmd);
       const wS = days > 6 ? ['ok','ok'] : days > 3 ? ['tight','warn'] : ['low','bad'];
       setNeed({want:E.want[1],got:E.got[1],st:E.st[1]},
               mmd.toFixed(1)+' mm/d', days.toFixed(1)+' d buf', wS);
 
-      // light: what the phase can use, against today's integral
       const lS = st.dli >= n.dli ? ['ok','ok']
                : st.dli >= n.dli*0.7 ? ['thin','warn'] : ['short','bad'];
       setNeed({want:E.want[2],got:E.got[2],st:E.st[2]},
@@ -1321,7 +1292,6 @@
     el.status.style.color = ok ? 'var(--green)' : 'var(--amber)';
   }
 
-  // ==========================================================================
   function frame(now) {
     const st = readState();
     const markDay = scrub === null ? st.missionDay : scrub;
@@ -1346,15 +1316,6 @@
     requestAnimationFrame(frame);
   }
 
-  // FF1 starts overhead. The position comes from ?lat=&lon= if the URL carries
-  // one, else from the browser's own fix, else it stays on 0N 0E. Nothing
-  // waits on any of it: the dashboard is already running when the fix lands.
-  //
-  // A page inside a cross-origin iframe cannot ask at all - geolocation's
-  // permissions policy defaults to 'self', so the frame needs allow=
-  // "geolocation" from whoever embeds it, and VS Code's Simple Browser does
-  // not set it. That is what the note in the panel title is for: sitting on
-  // 0N 0E with no explanation reads as a bug rather than a refusal.
   function setPosition(lat, lon, source) {
     sim.lat = lat;
     sim.lon = ((lon + 180) % 360 + 360) % 360 - 180;
