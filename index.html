@@ -136,7 +136,7 @@
   .crop .dd { font-variant-numeric: tabular-nums; text-align: right; }
   .crop .dd b { font-weight: 600; font-size: 12px; } .crop .dd i { font-style: normal;
               font-size: 8.5px; color: var(--dim); }
-  .need { display: grid; grid-template-columns: 34px 1fr auto 44px; gap: 6px;
+  .need { display: grid; grid-template-columns: 48px 1fr auto 44px; gap: 6px;
           align-items: baseline; padding: 1.5px 0 1.5px 16px; font-size: 10px; }
   .need .w { color: var(--dim); letter-spacing: 0.04em; }
   .need .want { color: rgba(215,242,255,0.72); font-variant-numeric: tabular-nums; }
@@ -305,9 +305,9 @@
   const R_OUT = 10.32, R_IN = 6.32;
   const BALLOON_R = 22.8, STANDOFF = 38.8, LIFT_H = 60.0, BALLOONS = 5;
   const SUBDIV = 4, RING_PHASE = (9 * Math.PI) / 180;
-  const TARGET_LO = 18, TARGET_HI = 20;
   const TURNAROUND = 10;
-  const ET0_REF = 4.5;
+  const PAR_PER_MJ = 2.04;
+  const SCORE_CROP = 0;
 
   const PHASES = ['establish', 'vegetative', 'bulking', 'mature'];
   const SPLIT = [0.15, 0.35, 0.35, 0.15];
@@ -315,26 +315,41 @@
 
   const CROPS = [
     { name: 'potato', area: 196, depth: 0.45, days: 100, off: 0, rgb: [95,141,62],
-      need: [ {t:[15,20], kc:0.50, dli: 8, note:'sprouting'},
-              {t:[17,22], kc:0.83, dli:20, note:'canopy building'},
-              {t:[15,19], kc:1.15, dli:30, note:'tubers filling'},
-              {t:[15,20], kc:0.75, dli:18, note:'skin set'} ] },
+      tBase: 7,
+      need: [ {gdd:180, dli: 8, night:[ 8,20], vpd:[0.35,1.10], heat:29, photo:null,
+               t:[15,20], kc:0.50, note:'sprouting'},
+              {gdd:450, dli:20, night:[10,20], vpd:[0.40,1.15], heat:29, photo:null,
+               t:[17,22], kc:0.83, note:'canopy building'},
+              {gdd:600, dli:30, night:[10,18], vpd:[0.45,1.00], heat:27, photo:[0,14],
+               t:[15,19], kc:1.15, note:'tubers filling'},
+              {gdd:200, dli:18, night:[ 8,20], vpd:[0.50,1.40], heat:29, photo:null,
+               t:[15,20], kc:0.75, note:'skin set'} ] },
     { name: 'tomato', area:  11, depth: 0.45, days: 110, off: 28, rgb: [192,80,64],
-      need: [ {t:[20,25], kc:0.60, dli: 8, note:'transplant'},
-              {t:[20,26], kc:0.88, dli:22, note:'frame building'},
-              {t:[18,26], kc:1.15, dli:30, note:'fruit set and fill'},
-              {t:[20,26], kc:0.80, dli:20, note:'ripening'} ] },
+      tBase: 10,
+      need: [ {gdd:200, dli: 8, night:[13,22], vpd:[0.40,1.10], heat:32, photo:null,
+               t:[20,25], kc:0.60, note:'transplant'},
+              {gdd:480, dli:22, night:[13,22], vpd:[0.50,1.20], heat:32, photo:null,
+               t:[20,26], kc:0.88, note:'frame building'},
+              {gdd:700, dli:30, night:[15,21], vpd:[0.60,1.10], heat:30, photo:null,
+               t:[18,26], kc:1.15, note:'fruit set and fill'},
+              {gdd:250, dli:20, night:[14,22], vpd:[0.55,1.30], heat:32, photo:null,
+               t:[20,26], kc:0.80, note:'ripening'} ] },
     { name: 'onion',  area:   2, depth: 0.25, days: 100, off: 72, rgb: [185,167,196],
-      need: [ {t:[13,22], kc:0.70, dli: 8, note:'rooting'},
-              {t:[15,24], kc:0.88, dli:18, note:'leaf building'},
-              {t:[18,24], kc:1.05, dli:26, note:'bulbing'},
-              {t:[20,28], kc:0.75, dli:16, note:'drying down'} ] }
+      tBase: 6,
+      need: [ {gdd:200, dli: 8, night:[ 8,20], vpd:[0.35,1.20], heat:30, photo:null,
+               t:[13,22], kc:0.70, note:'rooting'},
+              {gdd:450, dli:18, night:[ 8,20], vpd:[0.40,1.30], heat:30, photo:null,
+               t:[15,24], kc:0.88, note:'leaf building'},
+              {gdd:550, dli:26, night:[10,21], vpd:[0.45,1.30], heat:30, photo:[14,24],
+               t:[18,24], kc:1.05, note:'bulbing'},
+              {gdd:200, dli:16, night:[10,24], vpd:[0.80,2.00], heat:32, photo:null,
+               t:[20,28], kc:0.75, note:'drying down'} ] }
   ];
   const TOTAL_AREA = CROPS.reduce(function (s, c) { return s + c.area; }, 0);
   const ROCK_DARK = [70,58,48], BALLOON_COLOR = [226,196,74];
 
   const LAUNCH = Date.UTC(2026, 2, 14, 6, 0);
-  const sim = { lat: 0, lon: 0, alt: 1180, hdg: 68, drift: 17,
+  const sim = { lat: 0, lon: 0, alt: 2, hdg: 68, drift: 17,
                 fuel: 0.62, cloud: 0.22, water: 9.6 };
   let scrub = null;
 
@@ -360,29 +375,169 @@
              elev: elev, noon: noon };
   }
 
+  function svp(t) { return 0.6108 * Math.exp(17.27 * t / (t + 237.3)); }
+  function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+  function doyOf(solarMs) {
+    const sd = new Date(solarMs);
+    return Math.floor((solarMs - Date.UTC(sd.getUTCFullYear(), 0, 0)) / 86400000);
+  }
+
+  function raDaily(latDeg, doy) {
+    const lat = latDeg * D;
+    const decl = 0.409 * Math.sin(2 * Math.PI * doy / 365 - 1.39);
+    const dr = 1 + 0.033 * Math.cos(2 * Math.PI * doy / 365);
+    const ws = Math.acos(clamp(-Math.tan(lat) * Math.tan(decl), -1, 1));
+    return (24 * 60 / Math.PI) * 0.0820 * dr *
+           (ws * Math.sin(lat) * Math.sin(decl) +
+            Math.cos(lat) * Math.cos(decl) * Math.sin(ws));
+  }
+
+  const simulatedWeather = {
+    name: 'simulated',
+    prime: function () {},
+    at: function (latDeg, lonDeg, when) {
+      const solarMs = when + lonDeg / 15 * 3600000;
+      const doy = doyOf(solarMs);
+      const s = solar(latDeg, doy, 12);
+      const hemi = latDeg < 0 ? -1 : 1;
+      const season = Math.sin(2 * Math.PI * (doy - 80) / 365) * hemi;
+      const mean = -12 + 40 * Math.cos(latDeg * D) +
+                   season * (1 + 0.32 * Math.abs(latDeg));
+      const cloud = clamp(0.34 + 0.26 * Math.sin(lonDeg * D * 1.7 + doy / 23) +
+                          0.18 * Math.sin(latDeg * D * 2.3), 0.02, 0.92);
+      const half = 5.2 * (1 - 0.55 * cloud);
+      const tmax = mean + half, tmin = mean - half;
+
+      const dry = 7 * Math.exp(-Math.pow((Math.abs(latDeg) - 25) / 12, 2));
+      const tdew = tmin - 2 - dry;
+      const ea = svp(tdew), es = (svp(tmax) + svp(tmin)) / 2;
+
+      const ra = raDaily(latDeg, doy);
+      const rs = Math.max(0, ra * (0.75 - 0.45 * cloud));
+      const raMm = ra * 0.408;
+      const et0 = Math.max(0, 0.0023 * raMm * (mean + 17.8) *
+                              Math.sqrt(Math.max(0, tmax - tmin)));
+
+      const utc = new Date(when);
+      const lst = localSolar(utc.getUTCHours() + utc.getUTCMinutes() / 60 +
+                             utc.getUTCSeconds() / 3600, lonDeg);
+
+      return {
+        temperature_2m: mean + half * Math.sin(2 * Math.PI * (lst - 10) / 24),
+        temperature_2m_max: tmax,
+        temperature_2m_min: tmin,
+        relative_humidity_2m: clamp(100 * ea / es, 3, 100),
+        vapour_pressure_deficit: Math.max(0, es - ea),
+        shortwave_radiation_sum: rs,
+        daylight_duration: s.dayLen * 3600,
+        et0_fao_evapotranspiration: et0,
+        cloud_cover: cloud * 100
+      };
+    }
+  };
+
+  function nearestIndex(times, sec) {
+    let lo = 0, hi = times.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (times[mid] < sec) lo = mid + 1; else hi = mid;
+    }
+    if (lo > 0 && Math.abs(times[lo-1] - sec) < Math.abs(times[lo] - sec)) return lo - 1;
+    return lo;
+  }
+
+  const openMeteoWeather = {
+    name: 'open-meteo',
+    endpoint: 'https://api.open-meteo.com/v1/forecast',
+    hourly: ['temperature_2m','relative_humidity_2m','vapour_pressure_deficit','cloud_cover'],
+    daily: ['temperature_2m_max','temperature_2m_min','shortwave_radiation_sum',
+            'daylight_duration','et0_fao_evapotranspiration'],
+    cache: new Map(),
+    pending: false,
+    key: function (lat, lon) { return lat.toFixed(2) + ',' + lon.toFixed(2); },
+    prime: function (points) {
+      if (this.pending) return;
+      const self = this;
+      const miss = points.filter(function (pt) {
+        return !self.cache.has(self.key(pt.lat, pt.lon));
+      });
+      if (!miss.length) return;
+      this.pending = true;
+      fetch(this.endpoint +
+        '?latitude=' + miss.map(function (pt) { return pt.lat.toFixed(4); }).join(',') +
+        '&longitude=' + miss.map(function (pt) { return pt.lon.toFixed(4); }).join(',') +
+        '&hourly=' + this.hourly.join(',') +
+        '&daily=' + this.daily.join(',') +
+        '&forecast_days=16&timeformat=unixtime&timezone=UTC')
+        .then(function (r) { return r.json(); })
+        .then(function (body) {
+          const rows = Array.isArray(body) ? body : [body];
+          rows.forEach(function (row, i) {
+            if (row && row.hourly && miss[i])
+              self.cache.set(self.key(miss[i].lat, miss[i].lon), row);
+          });
+          self.pending = false;
+        })
+        .catch(function () { self.pending = false; });
+    },
+    at: function (lat, lon, when) {
+      const row = this.cache.get(this.key(lat, lon));
+      if (!row) return simulatedWeather.at(lat, lon, when);
+      const sec = when / 1000;
+      const h = nearestIndex(row.hourly.time, sec);
+      const d = nearestIndex(row.daily.time, sec);
+      return {
+        temperature_2m: row.hourly.temperature_2m[h],
+        temperature_2m_max: row.daily.temperature_2m_max[d],
+        temperature_2m_min: row.daily.temperature_2m_min[d],
+        relative_humidity_2m: row.hourly.relative_humidity_2m[h],
+        vapour_pressure_deficit: row.hourly.vapour_pressure_deficit[h],
+        shortwave_radiation_sum: row.daily.shortwave_radiation_sum[d],
+        daylight_duration: row.daily.daylight_duration[d],
+        et0_fao_evapotranspiration: row.daily.et0_fao_evapotranspiration[d],
+        cloud_cover: row.hourly.cloud_cover[h]
+      };
+    }
+  };
+
+  const PROVIDERS = { simulated: simulatedWeather, 'open-meteo': openMeteoWeather };
+  let weather = PROVIDERS[new URLSearchParams(location.search).get('weather')] ||
+                simulatedWeather;
+
+  function scoringPoints() {
+    return CANDIDATES.map(function (cd) {
+      return { lat: sim.lat + cd.dLat, lon: sim.lon + cd.dLon };
+    });
+  }
+
+
+  function axesOf(wx, crop) {
+    return {
+      gddRate: Math.max(0, (wx.temperature_2m_max + wx.temperature_2m_min) / 2 - crop.tBase),
+      nightMin: wx.temperature_2m_min,
+      dayMax: wx.temperature_2m_max,
+      dli: wx.shortwave_radiation_sum * PAR_PER_MJ,
+      photoperiod: wx.daylight_duration / 3600,
+      vpd: wx.vapour_pressure_deficit
+    };
+  }
+
   function readState() {
     const now = Date.now();
     const d = new Date(now);
     const utcHours = d.getUTCHours() + d.getUTCMinutes()/60 + d.getUTCSeconds()/3600;
-    const solarNow = now + sim.lon / 15 * 3600000;
-    const sd = new Date(solarNow);
-    const doy = Math.floor((solarNow - Date.UTC(sd.getUTCFullYear(), 0, 0)) / 86400000);
+    const doy = doyOf(now + sim.lon / 15 * 3600000);
     const missionDay = (now - LAUNCH) / 86400000;
     const solarHours = localSolar(utcHours, sim.lon);
     const s = solar(sim.lat, doy, solarHours);
-
-    const mean = 19.1 + Math.sin(missionDay / 11) * 1.15;
-    const swing = 3.4 * Math.max(0, Math.sin((solarHours - 9.2)/24*2*Math.PI + 0.6));
-    const temp = mean - 1.9 + swing;
-    const rh = Math.max(28, Math.min(96, 74 - (temp - 17)*4.1 + Math.sin(solarHours/3.1)*5));
-    const svp = 0.6108 * Math.exp(17.27*temp/(temp + 237.3));
-    const vpd = svp * (1 - rh/100);
-    const clear = 28 * Math.max(0, Math.sin(s.noon * D)) * (s.dayLen / 12) * 2.1;
-    const dli = clear * (1 - 0.7 * sim.cloud);
-    const et0 = Math.max(0.5, Math.min(9, dli * 0.085 * (0.70 + 0.50 * vpd)));
+    const wx = weather.at(sim.lat, sim.lon, now);
 
     return { now: now, d: d, lst: solarHours, doy: doy, missionDay: missionDay,
-             sun: s, temp: temp, rh: rh, vpd: vpd, et0: et0, dli: dli };
+             sun: s, wx: wx,
+             temp: wx.temperature_2m, rh: wx.relative_humidity_2m,
+             vpd: wx.vapour_pressure_deficit,
+             et0: wx.et0_fao_evapotranspiration,
+             dli: wx.shortwave_radiation_sum * PAR_PER_MJ };
   }
 
   function cycleAt(c, day) {
@@ -397,6 +552,7 @@
       idx = i;
     }
     return { idx: idx, phase: PHASES[idx], progress: pos / c.days,
+             phaseDays: SPLIT[idx] * c.days,
              toHarvest: Math.ceil(c.days - pos) };
   }
 
@@ -1070,16 +1226,18 @@
   function hours(h){ const t=Math.round(h*60);
     return Math.floor(t/60)+'h '+pad2(t%60)+'m'; }
   const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const CANDIDATES=[{name:'hold station',brg:'—',dist:0,dt:0.0},
-                    {name:'NNE 240 km',brg:'022°',dist:240,dt:-1.4},
-                    {name:'W 410 km',brg:'271°',dist:410,dt:+0.9},
-                    {name:'SSW 620 km',brg:'203°',dist:620,dt:+2.6}];
+  const CANDIDATES=[{name:'hold station',brg:'—',   dist:0,  dLat: 0.00,dLon: 0.00},
+                    {name:'NNE 240 km', brg:'022°',dist:240,dLat: 2.00,dLon: 0.81},
+                    {name:'W 410 km',   brg:'271°',dist:410,dLat: 0.06,dLon:-3.69},
+                    {name:'SSW 620 km', brg:'203°',dist:620,dLat:-5.13,dLon:-2.18}];
+  const NEED_ROWS = ['thermal','night','light','vpd','daylen'];
+  const PHOTO_ROW = 4;
   let cropEls=null, candEls=null;
 
   function buildRows() {
     el.croplist.innerHTML = CROPS.map(function(c,i){
-      const n = ['temp','water','light'].map(function(w,j){
-        return '<div class="need"><span class="w">'+w+'</span>'+
+      const n = NEED_ROWS.map(function(w,j){
+        return '<div class="need" data-row="'+i+'-'+j+'"><span class="w">'+w+'</span>'+
                '<span class="want" data-want="'+i+'-'+j+'"></span>'+
                '<span class="got" data-got="'+i+'-'+j+'"></span>'+
                '<span class="st" data-st="'+i+'-'+j+'"></span></div>';
@@ -1097,9 +1255,10 @@
       const q = s => el.croplist.querySelector(s);
       return { root:q('[data-crop="'+i+'"]'), ph:q('[data-ph="'+i+'"]'),
         dd:q('[data-dd="'+i+'"]'), note:q('[data-note="'+i+'"]'),
-        want:[0,1,2].map(j=>q('[data-want="'+i+'-'+j+'"]')),
-        got:[0,1,2].map(j=>q('[data-got="'+i+'-'+j+'"]')),
-        st:[0,1,2].map(j=>q('[data-st="'+i+'-'+j+'"]')) };
+        rows:[0,1,2,3,4].map(j=>q('[data-row="'+i+'-'+j+'"]')),
+        want:[0,1,2,3,4].map(j=>q('[data-want="'+i+'-'+j+'"]')),
+        got:[0,1,2,3,4].map(j=>q('[data-got="'+i+'-'+j+'"]')),
+        st:[0,1,2,3,4].map(j=>q('[data-st="'+i+'-'+j+'"]')) };
     });
     el.candlist.innerHTML = CANDIDATES.map(function(c,i){
       return '<div class="cand"><div class="hd"><span>'+c.name+'</span>'+
@@ -1112,15 +1271,39 @@
     });
   }
 
-  function setNeed(cell, want, got, status) {
-    cell.want.textContent = want; cell.got.textContent = got;
-    cell.st.textContent = status[0]; cell.st.className = 'st ' + status[1];
+  function setNeed(E, j, want, got, status) {
+    E.want[j].textContent = want; E.got[j].textContent = got;
+    E.st[j].textContent = status[0]; E.st[j].className = 'st ' + status[1];
   }
 
-  function fitScore(t) {
-    if (t >= TARGET_LO && t <= TARGET_HI) return 100 - Math.abs(t-19)*4;
-    const d = t < TARGET_LO ? TARGET_LO-t : t-TARGET_HI;
-    return Math.max(0, 96 - d*13);
+  function bandStatus(v, lo, hi, soft, labels) {
+    if (v >= lo && v <= hi) return ['ok','ok'];
+    const d = v < lo ? lo - v : v - hi;
+    return [v < lo ? labels[0] : labels[1], d > soft ? 'bad' : 'warn'];
+  }
+
+  function bandMiss(v, lo, hi, soft) {
+    if (v < lo) return Math.min(1, (lo - v) / soft);
+    if (v > hi) return Math.min(1, (v - hi) / soft);
+    return 0;
+  }
+  function shortOf(got, want, soft) {
+    return Math.min(1, Math.max(0, (want - got) / Math.max(0.001, soft)));
+  }
+
+  const WEIGHT = { gdd:26, night:22, light:24, vpd:16, heat:12, photo:20 };
+
+  function fitScore(wx, crop, ph, daysLeft) {
+    const a = axesOf(wx, crop), rate = ph.gdd / Math.max(1, daysLeft);
+    let miss = 0;
+    miss += WEIGHT.gdd   * shortOf(a.gddRate, rate, rate * 0.6);
+    miss += WEIGHT.night * bandMiss(a.nightMin, ph.night[0], ph.night[1], 4);
+    miss += WEIGHT.light * shortOf(a.dli, ph.dli, ph.dli * 0.5);
+    miss += WEIGHT.vpd   * bandMiss(a.vpd, ph.vpd[0], ph.vpd[1], 0.6);
+    miss += WEIGHT.heat  * shortOf(-a.dayMax, -ph.heat, 5);
+    if (ph.photo) miss += WEIGHT.photo *
+      bandMiss(a.photoperiod, ph.photo[0], ph.photo[1], 1.5);
+    return Math.max(0, 100 - miss);
   }
 
   document.querySelectorAll('.panel .ttl').forEach(function (t) {
@@ -1181,20 +1364,24 @@
     el.datestr.textContent = d.getUTCDate()+' '+MONTHS[d.getUTCMonth()]+' '+d.getUTCFullYear();
     el.latlon.textContent = Math.abs(sim.lat).toFixed(2)+'°'+(sim.lat>=0?'N':'S')+'  '+
                             Math.abs(sim.lon).toFixed(2)+'°'+(sim.lon>=0?'E':'W');
-    el.alt.textContent = Math.round(sim.alt)+' m AMSL';
+    el.alt.textContent = Math.round(sim.alt)+' m AGL';
     el.hdg.textContent = pad2(Math.round(sim.hdg))+'°';
     el.drift.textContent = sim.drift.toFixed(0)+' km/h';
 
+    const scored = CROPS[SCORE_CROP], scyc = cycleAt(scored, st.missionDay);
+    const sph = scyc.idx < 0 ? null : scored.need[scyc.idx];
+    const lo = sph ? sph.t[0] : 15, hi = sph ? sph.t[1] : 25;
+
     el.temp.textContent = st.temp.toFixed(1);
     const pc = t => ((t-8)/24)*100;
-    el.gband.style.left = pc(TARGET_LO)+'%';
-    el.gband.style.width = (pc(TARGET_HI)-pc(TARGET_LO))+'%';
+    el.gband.style.left = pc(lo)+'%';
+    el.gband.style.width = (pc(hi)-pc(lo))+'%';
     el.gneedle.style.left = Math.max(0,Math.min(100,pc(st.temp)))+'%';
-    const inBand = st.temp >= TARGET_LO && st.temp <= TARGET_HI;
+    const inBand = st.temp >= lo && st.temp <= hi;
     el.temp.style.color = inBand ? 'var(--green)' : 'var(--amber)';
 
     el.rh.textContent = st.rh.toFixed(0);
-    el.cloud.textContent = (sim.cloud*100).toFixed(0);
+    el.cloud.textContent = st.wx.cloud_cover.toFixed(0);
     el.vpd.textContent = st.vpd.toFixed(2);
     el.daylen.textContent = hours(st.sun.dayLen);
     el.rise.textContent = hhmm(st.sun.rise);
@@ -1230,7 +1417,7 @@
     el.wres.textContent = sim.water.toFixed(1)+' t';
     el.wdraw.textContent = draw.toFixed(2)+' t/d';
     el.et.textContent = st.et0.toFixed(1)+' mm/d';
-    el.wcap.textContent = (sim.cloud*1.1).toFixed(2)+' t';
+    el.wcap.textContent = (st.wx.cloud_cover/100*1.1).toFixed(2)+' t';
     const dry = sim.water/Math.max(0.01,draw);
     el.wdays.textContent = dry.toFixed(1)+' d';
     el.wdays.className = 'v '+(dry>5?'ok':dry>2?'hi':'no');
@@ -1245,43 +1432,56 @@
       if (cy.idx < 0) {
         E.root.classList.add('idle');
         E.note.textContent = 'bed empty, being turned round';
-        setNeed({want:E.want[0],got:E.got[0],st:E.st[0]}, '—', '—', ['idle','']);
-        setNeed({want:E.want[1],got:E.got[1],st:E.st[1]}, '—', '—', ['idle','']);
-        setNeed({want:E.want[2],got:E.got[2],st:E.st[2]}, '—', '—', ['idle','']);
+        for (let j = 0; j < NEED_ROWS.length; j++) {
+          E.rows[j].style.display = j === PHOTO_ROW ? 'none' : '';
+          setNeed(E, j, '—', '—', ['idle','']);
+        }
         continue;
       }
       E.root.classList.remove('idle');
-      const n = c.need[cy.idx];
+      const n = c.need[cy.idx], a = axesOf(st.wx, c);
       E.note.textContent = n.note;
 
-      const tS = st.temp < n.t[0] ? ['cool', st.temp < n.t[0]-3 ? 'bad':'warn']
-               : st.temp > n.t[1] ? ['warm', st.temp > n.t[1]+3 ? 'bad':'warn']
-               : ['ok','ok'];
-      setNeed({want:E.want[0],got:E.got[0],st:E.st[0]},
-              n.t[0]+'–'+n.t[1]+' °C', st.temp.toFixed(1), tS);
+      const rate = n.gdd / cy.phaseDays;
+      const gS = a.gddRate >= rate ? ['ok','ok']
+               : a.gddRate >= rate*0.7 ? ['slow','warn'] : ['stalled','bad'];
+      setNeed(E, 0, rate.toFixed(1)+' °Cd/d', a.gddRate.toFixed(1), gS);
 
-      const mmd = n.kc * st.et0;
-      const buffer = c.depth * 120;
-      const days = buffer / Math.max(0.1, mmd);
-      const wS = days > 6 ? ['ok','ok'] : days > 3 ? ['tight','warn'] : ['low','bad'];
-      setNeed({want:E.want[1],got:E.got[1],st:E.st[1]},
-              mmd.toFixed(1)+' mm/d', days.toFixed(1)+' d buf', wS);
+      setNeed(E, 1, n.night[0]+'–'+n.night[1]+' °C', a.nightMin.toFixed(1),
+              bandStatus(a.nightMin, n.night[0], n.night[1], 3, ['cold','hot']));
 
-      const lS = st.dli >= n.dli ? ['ok','ok']
-               : st.dli >= n.dli*0.7 ? ['thin','warn'] : ['short','bad'];
-      setNeed({want:E.want[2],got:E.got[2],st:E.st[2]},
-              n.dli+' mol/d', st.dli.toFixed(0), lS);
+      const lS = a.dli >= n.dli ? ['ok','ok']
+               : a.dli >= n.dli*0.7 ? ['thin','warn'] : ['short','bad'];
+      setNeed(E, 2, n.dli+' mol/d', a.dli.toFixed(0), lS);
+
+      setNeed(E, 3, n.vpd[0].toFixed(2)+'–'+n.vpd[1].toFixed(2), a.vpd.toFixed(2),
+              bandStatus(a.vpd, n.vpd[0], n.vpd[1], 0.4, ['damp','dry']));
+
+      E.rows[PHOTO_ROW].style.display = n.photo ? '' : 'none';
+      if (n.photo) {
+        const want = n.photo[0] <= 0 ? '\u2264'+n.photo[1]+' h'
+                   : n.photo[1] >= 24 ? '\u2265'+n.photo[0]+' h'
+                   : n.photo[0]+'\u2013'+n.photo[1]+' h';
+        setNeed(E, PHOTO_ROW, want, hours(a.photoperiod),
+                bandStatus(a.photoperiod, n.photo[0], n.photo[1], 1, ['short','long']));
+      }
     }
 
     let best=-1, bi=0;
     for (let i = 0; i < CANDIDATES.length; i++) {
-      const t = st.temp + CANDIDATES[i].dt, s = fitScore(t);
-      if (s > best) { best = s; bi = i; }
-      candEls[i].sc.textContent = s.toFixed(0);
-      candEls[i].sc.style.color = s>=88?'var(--green)':s>=65?'var(--amber)':'var(--red)';
-      candEls[i].dt.textContent = CANDIDATES[i].brg+'  ·  '+
-        (CANDIDATES[i].dist ? CANDIDATES[i].dist+' km  ·  ' : '')+
-        t.toFixed(1)+' °C  ·  '+(CANDIDATES[i].dist/17||0).toFixed(0)+' h';
+      const cd = CANDIDATES[i];
+      const eta = cd.dist / Math.max(1, sim.drift);
+      const wx = weather.at(sim.lat + cd.dLat, sim.lon + cd.dLon,
+                            st.now + eta * 3600000);
+      const sc = sph ? fitScore(wx, scored, sph, scyc.phaseDays) : 0;
+      if (sc > best) { best = sc; bi = i; }
+      candEls[i].sc.textContent = sc.toFixed(0);
+      candEls[i].sc.style.color = sc>=88?'var(--green)':sc>=65?'var(--amber)':'var(--red)';
+      const ax = axesOf(wx, scored);
+      candEls[i].dt.textContent = cd.brg+'  ·  '+
+        (cd.dist ? cd.dist+' km · '+eta.toFixed(0)+' h  ·  ' : '')+
+        ax.nightMin.toFixed(0)+'/'+ax.dayMax.toFixed(0)+' °C  ·  '+
+        ax.dli.toFixed(0)+' mol  ·  '+hours(ax.photoperiod);
     }
     for (let i = 0; i < CANDIDATES.length; i++)
       candEls[i].sc.parentNode.parentNode.style.background =
@@ -1295,7 +1495,8 @@
   function frame(now) {
     const st = readState();
     const markDay = scrub === null ? st.missionDay : scrub;
-    sim.cloud = 0.28 + 0.24*Math.sin(st.missionDay/3.1);
+    sim.cloud = st.wx.cloud_cover / 100;
+    weather.prime(scoringPoints());
     sim.hdg = 60 + Math.sin(st.missionDay/4.1)*22;
     sim.drift = 14 + Math.sin(st.missionDay/2.7)*7;
 
@@ -1323,9 +1524,14 @@
     mapDirty = true;
     const simEl = document.getElementById('sim');
     if (simEl) simEl.textContent = source === 'url'
-      ? 'simulated conditions \u00b7 mission clock is real \u00b7 position set by url'
-      : 'simulated conditions \u00b7 mission clock and position are real';
+      ? weatherNote() + ' \u00b7 position set by url'
+      : weatherNote() + ' \u00b7 position is real';
     syncMapCtl();
+  }
+
+  function weatherNote() {
+    return (weather === simulatedWeather ? 'simulated conditions' : 'open-meteo forecast') +
+           ' \u00b7 mission clock is real';
   }
 
   function askPosition() {
@@ -1346,6 +1552,7 @@
 
   buildRows();
   syncMapCtl();
+  document.getElementById('sim').textContent = weatherNote();
   askPosition();
   window.addEventListener('resize', resize);
   resize();
