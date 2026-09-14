@@ -121,6 +121,9 @@
   .mapctl button:hover { background: rgba(111,224,255,0.16); }
   .mapctl button:disabled { opacity: 0.3; cursor: default;
     background: rgba(6,17,27,0.82); }
+  .maphint { position: absolute; left: 7px; bottom: 7px; font-size: 8.5px;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim);
+    background: rgba(6,17,27,0.75); padding: 2px 6px; pointer-events: none; }
   #recentre { position: absolute; right: 7px; bottom: 7px; padding: 2px 8px;
     font: inherit; font-size: 8.5px; letter-spacing: 0.14em; cursor: pointer;
     text-transform: uppercase; color: var(--amber); background: rgba(6,17,27,0.82);
@@ -264,6 +267,7 @@
             <button id="zoomout" title="zoom out">&minus;</button>
           </div>
           <button id="recentre">centre on FF1</button>
+          <div class="maphint">click to relocate</div>
         </div>
       </div>
     </div>
@@ -275,11 +279,11 @@
         <b id="cropwhen">now</b></div>
       <div class="body"><div id="croplist"></div>
         <div style="font-size:8.5px;color:var(--dim);letter-spacing:.08em;margin-top:7px">
-          drag the timeline bar to read needs at another date</div>
+          drag to read another date &middot; click a crop row to sow or clear</div>
       </div>
     </div>
     <div class="panel" id="move">
-      <div class="ttl"><span class="lhs"><span class="chev">▾</span>Relocation candidates</span><b>forecast</b></div>
+      <div class="ttl"><span class="lhs"><span class="chev">▾</span>Relocation candidates</span><b id="candtag">—</b></div>
       <div class="body"><div id="candlist"></div></div>
     </div>
   </div>
@@ -322,19 +326,19 @@
   const PH_CSS = ['#3f6f8c', '#3f9c6b', '#b9a63c', '#c8663c'];
 
   const CROPS = [
-    { name: 'potato', area: 196, depth: 0.45, days: 100, off: 0, rgb: [95,141,62],
+    { name: 'potato', area: 196, depth: 0.45, days: 100, rgb: [95,141,62],
       tBase: 7,
       need: [ {gdd:180, dli: 8, night:[ 8,20], vpd:[0.35,1.10], heat:29, photo:null, kc:0.50, note:'sprouting'},
               {gdd:450, dli:20, night:[10,20], vpd:[0.40,1.15], heat:29, photo:null, kc:0.83, note:'canopy building'},
               {gdd:600, dli:30, night:[10,18], vpd:[0.45,1.00], heat:27, photo:[0,14], kc:1.15, note:'tubers filling'},
               {gdd:200, dli:18, night:[ 8,20], vpd:[0.50,1.40], heat:29, photo:null, kc:0.75, note:'skin set'} ] },
-    { name: 'tomato', area:  11, depth: 0.45, days: 110, off: 28, rgb: [192,80,64],
+    { name: 'tomato', area:  11, depth: 0.45, days: 110, rgb: [192,80,64],
       tBase: 10,
       need: [ {gdd:200, dli: 8, night:[13,22], vpd:[0.40,1.10], heat:32, photo:null, kc:0.60, note:'transplant'},
               {gdd:480, dli:22, night:[13,22], vpd:[0.50,1.20], heat:32, photo:null, kc:0.88, note:'frame building'},
               {gdd:700, dli:30, night:[15,21], vpd:[0.60,1.10], heat:30, photo:null, kc:1.15, note:'fruit set and fill'},
               {gdd:250, dli:20, night:[14,22], vpd:[0.55,1.30], heat:32, photo:null, kc:0.80, note:'ripening'} ] },
-    { name: 'onion',  area:   2, depth: 0.25, days: 100, off: 72, rgb: [185,167,196],
+    { name: 'onion',  area:   2, depth: 0.25, days: 100, rgb: [185,167,196],
       tBase: 6,
       need: [ {gdd:200, dli: 8, night:[ 8,20], vpd:[0.35,1.20], heat:30, photo:null, kc:0.70, note:'rooting'},
               {gdd:450, dli:18, night:[ 8,20], vpd:[0.40,1.30], heat:30, photo:null, kc:0.88, note:'leaf building'},
@@ -346,9 +350,10 @@
 
   const LAUNCH = Date.UTC(2026, 8, 10, 6, 0);
   const FORECAST_DAYS = 16;
-  const sim = { lat: 0, lon: 0, alt: 2, hdg: 68, drift: 17,
+  const sim = { lat: 49.28, lon: -123.12, alt: 2, hdg: 68, drift: 17,
                 fuel: 0.62, cloud: 0.22, water: 9.6 };
   let scrub = null;
+  let nowDay = 0;
 
   const D = Math.PI / 180;
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
@@ -556,49 +561,79 @@
 
   const STALL_RATE = 0.5;
 
-  function buildTrack(c, lat, lon, endDay) {
-    const first = Math.floor(c.off), rate = [];
+  function buildTrack(c, sowDay, lat, lon, fromDay, missionDay, endDay) {
+    const first = Math.max(0, Math.floor(fromDay)), rate = [];
     for (let d = first; d < endDay; d++) {
       const wx = weather.at(lat, lon, dayMs(d));
       rate[d] = Math.max(0, (wx.temperature_2m_max + wx.temperature_2m_min) / 2 - c.tBase);
     }
 
     const segs = [];
-    let day = first;
-    if (first > 0) segs.push({ from: 0, to: first, idx: -2 });
-    let guard = 0;
-    while (day < endDay && guard < 20000) {
-      let acc = 0, idx = 0, from = day;
-      while (idx < c.need.length && day < endDay && guard++ < 20000) {
-        acc += rate[day];
-        day += 1;
-        if (acc >= c.need[idx].gdd) {
-          acc -= c.need[idx].gdd;
-          segs.push({ from: from, to: day, idx: idx });
-          idx++; from = day;
+    if (sowDay !== null) {
+      let day = Math.max(first, Math.floor(sowDay)), guard = 0;
+      while (day < endDay && guard < 20000) {
+        let acc = 0, idx = 0, from = day;
+        while (idx < c.need.length && day < endDay && guard++ < 20000) {
+          acc += rate[day];
+          day += 1;
+          if (acc >= c.need[idx].gdd) {
+            acc -= c.need[idx].gdd;
+            segs.push({ from: from, to: day, idx: idx });
+            idx++; from = day;
+          }
         }
+        if (idx < c.need.length) { segs.push({ from: from, to: endDay, idx: idx, open: true }); break; }
+        segs.push({ from: day, to: day + TURNAROUND, idx: -1 });
+        day += TURNAROUND;
       }
-      if (idx < c.need.length) { segs.push({ from: from, to: endDay, idx: idx, open: true }); break; }
-      segs.push({ from: day, to: day + TURNAROUND, idx: -1 });
-      day += TURNAROUND;
     }
 
-    let last = first - 1;
-    for (let d = first; d < endDay; d++) if (rate[d] >= STALL_RATE) last = d;
-    const stall = last + 1 < endDay ? Math.max(first, last + 1) : null;
+    const watch = Math.max(first, Math.floor(sowDay === null ? missionDay : sowDay));
+    let last = watch - 1;
+    for (let d = watch; d < endDay; d++) if (rate[d] >= STALL_RATE) last = d;
+    const stall = last + 1 < endDay ? Math.max(watch, last + 1) : null;
 
-    return { segs: segs, stall: stall, rate: rate };
+    return { segs: segs, stall: stall, rate: rate, sown: sowDay, from: watch };
   }
 
   const devel = { key: null, tracks: null };
 
-  function tracksFor(lat, lon, missionDay, endDay) {
+  const sown = CROPS.map(function () { return null; });
+
+  const outlook = { key: null, rows: null };
+
+  function candidateOutlooks(lat, lon, now, missionDay, endDay) {
+    const crop = CROPS[SCORE_CROP];
+    const key = [weather.name, weather.cache ? weather.cache.size : 0,
+                 lat.toFixed(2), lon.toFixed(2), Math.floor(missionDay)].join('|');
+    if (outlook.key === key) return outlook.rows;
+    outlook.key = key;
+    outlook.rows = CANDIDATES.map(function (cd) {
+      const eta = cd.dist / Math.max(1, sim.drift);
+      const cLat = lat + cd.dLat, cLon = lon + cd.dLon;
+      const arrive = missionDay + eta / 24;
+      const tr = buildTrack(crop, arrive, cLat, cLon, arrive, arrive, endDay);
+      let harvest = null;
+      for (let i = 0; i < tr.segs.length; i++)
+        if (tr.segs[i].idx === -1) { harvest = tr.segs[i].from; break; }
+      return { eta: eta, lat: cLat, lon: cLon,
+               wx: weather.at(cLat, cLon, now + eta * 3600000),
+               usable: tr.stall === null ? Infinity : Math.max(0, tr.stall - arrive),
+               harvest: harvest };
+    });
+    return outlook.rows;
+  }
+
+  function tracksFor(lat, lon, missionDay, fromDay, endDay) {
     const primed = weather.cache ? weather.cache.size : 0;
     const key = [weather.name, primed, lat.toFixed(2), lon.toFixed(2),
-                 Math.floor(missionDay), Math.ceil(endDay)].join('|');
+                 Math.floor(missionDay), Math.floor(fromDay), Math.ceil(endDay),
+                 sown.join(',')].join('|');
     if (devel.key !== key) {
       devel.key = key;
-      devel.tracks = CROPS.map(function (c) { return buildTrack(c, lat, lon, endDay); });
+      devel.tracks = CROPS.map(function (c, i) {
+        return buildTrack(c, sown[i], lat, lon, fromDay, missionDay, endDay);
+      });
     }
     return devel.tracks;
   }
@@ -841,7 +876,7 @@
     const plotW = W - padL - padR, rowH = (H - padT - padB) / CROPS.length;
     const day0 = Math.max(0, st.missionDay - BACK), span = BACK + FWD;
     const X = d => padL + (d - day0)/span * plotW;
-    geom = { padL: padL, plotW: plotW, day0: day0, span: span };
+    geom = { padL: padL, plotW: plotW, day0: day0, span: span, rows: [] };
 
     tctx.font = '9px ui-monospace, Menlo, monospace'; tctx.textBaseline = 'top';
     for (let d = Math.ceil(day0/10)*10; d <= day0+span; d += 10) {
@@ -855,6 +890,7 @@
     for (let i = 0; i < CROPS.length; i++) {
       const c = CROPS[i], y = padT + i*rowH;
       const bh = Math.max(10, rowH*0.50), by = y + (rowH-bh)/2;
+      geom.rows.push({ y: by, h: bh });
       tctx.fillStyle='rgb('+c.rgb.join(',')+')';
       tctx.fillRect(8, by+bh/2-4, 8, 8);
       tctx.fillStyle='rgba(215,242,255,0.9)'; tctx.textAlign='left'; tctx.textBaseline='middle';
@@ -891,6 +927,28 @@
           }
         }
       }
+      if (track.sown === null) {
+        const uf = Math.max(padL, X(Math.max(day0, st.missionDay)));
+        const ut = Math.min(padL + plotW, X(track.stall === null ? day0 + span : track.stall));
+        if (ut > uf) {
+          tctx.fillStyle = 'rgba(215,242,255,0.07)';
+          tctx.fillRect(uf, by + bh/2 - 2, ut - uf, 4);
+          tctx.fillStyle = 'rgba(122,163,184,0.8)';
+          tctx.textAlign = 'left'; tctx.textBaseline = 'middle';
+          tctx.font = '8.5px ui-monospace, Menlo, monospace';
+          tctx.fillText('click to sow', uf + 4, by + bh/2);
+        }
+      } else {
+        const mx = X(track.sown);
+        if (mx > padL - 4 && mx < padL + plotW) {
+          tctx.strokeStyle = '#6fe0ff'; tctx.lineWidth = 1.2;
+          tctx.beginPath(); tctx.moveTo(mx, by - 5); tctx.lineTo(mx, by + bh + 5); tctx.stroke();
+          tctx.fillStyle = '#6fe0ff'; tctx.textAlign = 'left'; tctx.textBaseline = 'bottom';
+          tctx.font = '8.5px ui-monospace, Menlo, monospace';
+          tctx.fillText('sown D' + Math.round(track.sown), mx + 3, by - 4);
+        }
+      }
+
       if (track.stall !== null && track.stall < day0 + span) {
         const sx = Math.max(padL, X(track.stall));
         const sb = Math.min(padL + plotW, X(day0 + span));
@@ -944,20 +1002,47 @@
     const d = geom.day0 + (x - geom.padL)/geom.plotW * geom.span;
     return Math.max(geom.day0, Math.min(geom.day0 + geom.span, d));
   }
-  let dragging = false;
+  function rowFromY(clientY) {
+    if (!geom || !geom.rows) return -1;
+    const y = clientY - tlc.getBoundingClientRect().top;
+    for (let i = 0; i < geom.rows.length; i++) {
+      const b = geom.rows[i];
+      if (y >= b.y - 4 && y <= b.y + b.h + 4) return i;
+    }
+    return -1;
+  }
+
+  function toggleSow(i, day) {
+    const d = Math.round(day);
+    if (sown[i] !== null && Math.abs(sown[i] - d) <= 2) sown[i] = null;
+    else if (d >= Math.ceil(nowDay)) sown[i] = d;
+    else return;
+    devel.key = null;
+  }
+
+  let dragging = false, pending = null;
   function grab(e) {
-    const cx = e.touches ? e.touches[0].clientX : e.clientX;
-    const d = dayFromX(cx); if (d === null) return;
-    dragging = true; scrub = d; nowBtn.style.visibility = 'visible';
+    const t = e.touches ? e.touches[0] : e;
+    const d = dayFromX(t.clientX); if (d === null) return;
+    const row = rowFromY(t.clientY);
+    if (row >= 0) pending = { row: row, day: d, x: t.clientX, y: t.clientY };
+    else { dragging = true; scrub = d; nowBtn.style.visibility = 'visible'; }
     e.preventDefault();
   }
   function move(e) {
+    const t = e.touches ? e.touches[0] : e;
+    if (pending) {
+      if (Math.abs(t.clientX - pending.x) + Math.abs(t.clientY - pending.y) < 5) return;
+      dragging = true; pending = null; nowBtn.style.visibility = 'visible';
+    }
     if (!dragging) return;
-    const cx = e.touches ? e.touches[0].clientX : e.clientX;
-    const d = dayFromX(cx); if (d !== null) scrub = d;
+    const d = dayFromX(t.clientX); if (d !== null) scrub = d;
     e.preventDefault();
   }
-  function release() { dragging = false; }
+  function release() {
+    if (pending) { toggleSow(pending.row, pending.day); pending = null; }
+    dragging = false;
+  }
   tlc.addEventListener('mousedown', grab);
   window.addEventListener('mousemove', move);
   window.addEventListener('mouseup', release);
@@ -1293,20 +1378,31 @@
     if (mapDirty) { drawMap(); mapDirty = false; }
     if (!view) return;
     const t = e.touches ? e.touches[0] : e;
-    mapDrag = { x: t.clientX, y: t.clientY, lon: view.cLon, cy: view.cy };
+    mapDrag = { x: t.clientX, y: t.clientY, lon: view.cLon, cy: view.cy, moved: false };
     mapWrap.classList.add('grabbing');
     e.preventDefault();
   }
   function mapMove(e) {
     if (!mapDrag || !view) return;
     const t = e.touches ? e.touches[0] : e;
+    if (!mapDrag.moved &&
+        Math.abs(t.clientX - mapDrag.x) + Math.abs(t.clientY - mapDrag.y) < 5) return;
+    mapDrag.moved = true;
     const lon = mapDrag.lon - (t.clientX - mapDrag.x) / view.ppd;
     map.lon = ((lon + 180) % 360 + 360) % 360 - 180;
     const ny = mapDrag.cy - (t.clientY - mapDrag.y) / view.S;
     map.lat = mercLat(Math.max(0, Math.min(1, ny)));
     mapDirty = true; syncMapCtl(); e.preventDefault();
   }
-  function mapRelease() { mapDrag = null; mapWrap.classList.remove('grabbing'); }
+  function mapRelease() {
+    if (mapDrag && !mapDrag.moved && view) {
+      const r = mapc.getBoundingClientRect();
+      const lon = view.cLon + (mapDrag.x - r.left - r.width / 2) / view.ppd;
+      const ny = view.cy + (mapDrag.y - r.top - r.height / 2) / view.S;
+      setPosition(mercLat(Math.max(0, Math.min(1, ny))), lon, 'map');
+    }
+    mapDrag = null; mapWrap.classList.remove('grabbing');
+  }
 
   mapc.addEventListener('mousedown', mapGrab);
   window.addEventListener('mousemove', mapMove);
@@ -1328,7 +1424,7 @@
    'trange','gdd','rh',
    'cloud','vpd','daylen','rise','set','risemk','setmk','sunmk','sunlab','dayscale','lstnow','elev','dli','mkrise','mkset','mknow','mass','lift',
    'margin','envt','fuel','burn','teth','tilt','lifttag','wres','wdraw','et','wcap','wdays',
-   'croplist','candlist','status','cropwhen']
+   'croplist','candlist','status','cropwhen','candtag']
    .forEach(function(id){ el[id] = document.getElementById(id); });
 
   function hhmm(h){ const H=Math.floor(((h%24)+24)%24), M=Math.floor((h-Math.floor(h))*60);
@@ -1472,7 +1568,7 @@
     el.sunmk.style.left = Math.round(Math.max(0, Math.min(w - uw, x))) + 'px';
   }
 
-  function updateHUD(st, markDay, tracks) {
+  function updateHUD(st, markDay, tracks, endDay) {
     const d = st.d;
     el.clock.textContent = pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes())+':'+
                            pad2(d.getUTCSeconds())+' UTC';
@@ -1486,9 +1582,12 @@
 
     const scored = CROPS[SCORE_CROP];
     const scyc = phaseAt(tracks[SCORE_CROP], st.missionDay) || { idx: -2 };
-    const sph = scyc.idx < 0 ? null : scored.need[scyc.idx];
-    const sRef = scyc.idx < 0 ? 1 : SPLIT[scyc.idx] * scored.days;
-    const night = sph ? sph.night : [10,20], ceil = sph ? sph.heat : 30;
+    const sIdx = scyc.idx >= 0 ? scyc.idx : 0;
+    const sph = scored.need[sIdx];
+    const sRef = SPLIT[sIdx] * scored.days;
+    const gaugePh = scyc.idx >= 0 ? sph : null;
+    const night = gaugePh ? gaugePh.night : sph.night;
+    const ceil = gaugePh ? gaugePh.heat : sph.heat;
     const sax = axesOf(st.wx, scored);
 
     el.temp.textContent = st.temp.toFixed(1);
@@ -1558,7 +1657,7 @@
       if (cy.idx < 0) {
         E.root.classList.add('idle');
         E.note.textContent = cy.idx === -1 ? 'bed empty, being turned round'
-                                           : 'not sown yet';
+                                           : 'not sown \u2014 click the timeline';
         for (let j = 0; j < NEED_ROWS.length; j++) {
           E.rows[j].style.display = j === PHOTO_ROW ? 'none' : '';
           setNeed(E, j, '—', '—', ['idle','']);
@@ -1596,21 +1695,27 @@
       }
     }
 
+    el.candtag.textContent = scored.name + ' \u00b7 ' +
+      (scyc.idx >= 0 ? sph.note : 'if sown');
+
     let best=-1, bi=0;
+    const outs = candidateOutlooks(sim.lat, sim.lon, st.now, st.missionDay, endDay);
     for (let i = 0; i < CANDIDATES.length; i++) {
-      const cd = CANDIDATES[i];
-      const eta = cd.dist / Math.max(1, sim.drift);
-      const wx = weather.at(sim.lat + cd.dLat, sim.lon + cd.dLon,
-                            st.now + eta * 3600000);
-      const sc = sph ? fitScore(wx, scored, sph, sRef) : 0;
+      const cd = CANDIDATES[i], o = outs[i];
+      const short = Math.min(1, Math.max(0, (scored.days - o.usable) / scored.days));
+      const sc = Math.max(0, fitScore(o.wx, scored, sph, sRef) - 45 * short);
       if (sc > best) { best = sc; bi = i; }
       candEls[i].sc.textContent = sc.toFixed(0);
       candEls[i].sc.style.color = sc>=88?'var(--green)':sc>=65?'var(--amber)':'var(--red)';
-      const ax = axesOf(wx, scored);
+      const ax = axesOf(o.wx, scored);
       candEls[i].dt.textContent = cd.brg+'  ·  '+
-        (cd.dist ? cd.dist+' km · '+eta.toFixed(0)+' h  ·  ' : '')+
+        (cd.dist ? cd.dist+' km · '+o.eta.toFixed(0)+' h  ·  ' : '')+
         ax.nightMin.toFixed(0)+'/'+ax.dayMax.toFixed(0)+' °C  ·  '+
-        ax.dli.toFixed(0)+' mol  ·  '+hours(ax.photoperiod);
+        ax.dli.toFixed(0)+' mol  ·  '+
+        (o.usable === Infinity
+          ? (o.harvest === null ? 'no stall' : 'harvest D' + Math.round(o.harvest))
+          : Math.round(o.usable) + ' d usable');
+      candEls[i].dt.style.color = o.usable < scored.days ? 'var(--red)' : '';
     }
     for (let i = 0; i < CANDIDATES.length; i++)
       candEls[i].sc.parentNode.parentNode.style.background =
@@ -1646,9 +1751,10 @@
       else if (k === 'cable') drawCable(items[i]);
       else drawBalloon(items[i], k0, glow);
     }
-    const endDay = Math.max(0, st.missionDay - BACK) + BACK + FWD;
-    const tracks = tracksFor(sim.lat, sim.lon, st.missionDay, endDay);
-    updateHUD(st, markDay, tracks);
+    nowDay = st.missionDay;
+    const fromDay = Math.max(0, st.missionDay - BACK);
+    const tracks = tracksFor(sim.lat, sim.lon, st.missionDay, fromDay, fromDay + BACK + FWD);
+    updateHUD(st, markDay, tracks, fromDay + BACK + FWD);
     drawTimeline(st, markDay, tracks);
     maybeDrawMap(now);
     requestAnimationFrame(frame);
@@ -1660,9 +1766,9 @@
     fixNote = '';
     mapDirty = true;
     const simEl = document.getElementById('sim');
-    if (simEl) simEl.textContent = source === 'url'
-      ? weatherNote() + ' \u00b7 position set by url'
-      : weatherNote() + ' \u00b7 position is real';
+    if (simEl) simEl.textContent = weatherNote() + ' \u00b7 ' +
+      (source === 'url' ? 'position set by url'
+       : source === 'map' ? 'relocated on the map' : 'position is real');
     syncMapCtl();
   }
 
