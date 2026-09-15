@@ -1809,6 +1809,21 @@
     return Number.isFinite(value) ? value.toFixed(digits) : '—';
   }
 
+  function updateWaterPanel(st, tracks) {
+    const draw = waterDemand(tracks, st.missionDay, st.et0);
+    const estimatedWater = st.wx.evaporation_estimated;
+    el.wres.textContent = sim.water.toFixed(1)+' t';
+    el.wdraw.textContent = (estimatedWater && Number.isFinite(draw) ? '~' : '') + formatWeather(draw, 2)+' t/d';
+    el.et.textContent = (estimatedWater && Number.isFinite(st.et0) ? '~' : '') + formatWeather(st.et0, 1)+' mm/d';
+    el.et.title = estimatedWater ? 'Estimated reference evaporation at altitude; relative wind = 0' : '';
+    el.wdraw.title = estimatedWater ? 'Estimated reference evaporation × crop-stage coefficient × planted area' : '';
+    el.wcap.textContent = formatWeather(st.wx.cloud_cover/100*1.1, 2)+' t';
+    const dry = draw === 0 ? Infinity : sim.water / draw;
+    el.wdays.textContent = dry === Infinity ? '∞ (no draw)' :
+      (estimatedWater && Number.isFinite(dry) ? '~' : '') + formatWeather(dry, 1)+' d';
+    el.wdays.className = 'v '+(dry>5?'ok':dry>2?'hi':'no');
+  }
+
   function updateHUD(st, markDay, tracks, endDay) {
     const d = st.d;
     el.clock.textContent = pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes())+':'+
@@ -1876,18 +1891,7 @@
     el.teth.textContent = '±1.2 %'; el.tilt.textContent = '0.00°';
     el.lifttag.textContent = '5 × 49,500 m³';
 
-    const draw = waterDemand(tracks, st.missionDay, st.et0);
-    const estimatedWater = st.wx.evaporation_estimated;
-    el.wres.textContent = sim.water.toFixed(1)+' t';
-    el.wdraw.textContent = (estimatedWater && Number.isFinite(draw) ? '~' : '') + formatWeather(draw, 2)+' t/d';
-    el.et.textContent = (estimatedWater && Number.isFinite(st.et0) ? '~' : '') + formatWeather(st.et0, 1)+' mm/d';
-    el.et.title = estimatedWater ? 'Estimated reference evaporation at altitude; relative wind = 0' : '';
-    el.wdraw.title = estimatedWater ? 'Estimated reference evaporation × crop-stage coefficient × planted area' : '';
-    el.wcap.textContent = formatWeather(st.wx.cloud_cover/100*1.1, 2)+' t';
-    const dry = draw === 0 ? Infinity : sim.water / draw;
-    el.wdays.textContent = dry === Infinity ? '∞ (no draw)' :
-      (estimatedWater && Number.isFinite(dry) ? '~' : '') + formatWeather(dry, 1)+' d';
-    el.wdays.className = 'v '+(dry>5?'ok':dry>2?'hi':'no');
+    updateWaterPanel(st, tracks);
 
     const off = markDay - st.missionDay;
     el.cropwhen.textContent = Math.abs(off) < 0.5 ? 'now'
