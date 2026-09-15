@@ -102,7 +102,10 @@ The pressure levels and variables are documented in the
 Position advances in real time with the selected adapter's wind, starting from
 the initial position. Selecting a new position resets the movement clock there.
 The map and coordinates follow the drift; scrubbing the crop timeline does not
-move the platform. After a suspended tab resumes, elapsed time is integrated in
+move the platform. An amber trail in the Position panel follows the route from
+the session's starting position to FF1, retaining a point each minute plus its
+live position. Clicking to relocate clears the trail and starts it there.
+After a suspended tab resumes, elapsed time is integrated in
 steps using weather along the route (simulated fallback in surface mode, paused
 drift for unavailable pressure-level data). Reloading starts a new session;
 the flight path and selected level are not persisted.
