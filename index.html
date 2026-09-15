@@ -699,6 +699,7 @@
     if (level !== null && !PRESSURE_LEVELS.includes(level)) throw new RangeError('Unknown pressure level');
     advancePosition(Date.now());
     pressureLevel = level;
+    positionTime = Date.now();
     readState();
   }
 
@@ -710,7 +711,13 @@
     const steps = Math.min(240, Math.ceil((now - positionTime) / 60000));
     const dt = (now - positionTime) / steps;
     for (let i = 0; i < steps; i++) {
-      const flight = flightAt(sim.lat, sim.lon, positionTime + i * dt);
+      if (pressureLevel !== null && weather === openMeteoWeather &&
+          !openMeteoWeather.cache.has(openMeteoWeather.key(sim.lat, sim.lon))) {
+        weather.prime([{ lat: sim.lat, lon: sim.lon }], (now - positionTime) / 86400000 + 2);
+        return;
+      }
+      const flight = flightAt(sim.lat, sim.lon, positionTime);
+      positionTime += dt;
       if (!flight) continue;
       const distance = flight.speed * dt / 3600000;
       if (distance === 0) continue;
