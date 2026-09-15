@@ -34,6 +34,14 @@ function trail(run) {
   return JSON.parse(run("JSON.stringify(strokes.filter(s => s.color === '#ffc861' && s.width === 2).flatMap(s => s.path))"));
 }
 
+test('position panel hides the direction arrow when flight wind is unavailable', () => {
+  const run = positionPanel();
+  run('sim.flightAvailable = true; drawMap()');
+  assert.ok(run("strokes.some(s => s.color === 'rgba(111,224,255,0.85)')"));
+  run('strokes.length = 0; sim.flightAvailable = false; drawMap()');
+  assert.equal(run("strokes.some(s => s.color === 'rgba(111,224,255,0.85)')"), false);
+});
+
 test('position panel draws the travelled route from the start through a wind change', () => {
   const run = positionPanel();
   run(`advancePosition(${when}); advancePosition(${when + 60000})`);

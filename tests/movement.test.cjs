@@ -6,6 +6,48 @@ function steadyWind(run, speed, direction) {
   run(`weather = { at: () => ({ wind_speed_10m: ${speed}, wind_direction_10m: ${direction} }) }`);
 }
 
+test('surface drift south of Hawaii catches up using forecast wind along the entire route', async () => {
+  const fixture = app('open-meteo');
+  forecast(fixture, 27, 62);
+  fixture('hourly.wind_speed_10m = [27, 27]; hourly.wind_direction_10m = [62, 62]');
+  const row = JSON.parse(fixture("JSON.stringify(openMeteoWeather.cache.get('0.00,0.00'))"));
+  let requests = 0;
+  const run = app('open-meteo', async () => {
+    requests++;
+    return { ok: true, json: async () => structuredClone(row) };
+  });
+  run(`sim.lat = 18.01; sim.lon = -154.28; readState()`);
+  const end = when + 8 * 3600000;
+  run(`Date.now = () => ${end}; readState()`);
+  assert.equal(run('sim.lon'), -154.28, 'missing initial forecast must not cause simulated eastward drift');
+  assert.equal(run('positionTime'), when, 'elapsed time must be retained while waiting for forecasts');
+  let previousLon = -154.28;
+  for (let i = 0; i < 1000 && run('positionTime') < end; i++) {
+    await new Promise(resolve => setImmediate(resolve));
+    run('readState()');
+    assert.ok(run('sim.lon') <= previousLon, 'every catch-up step must travel west with the supplied wind');
+    previousLon = run('sim.lon');
+  }
+  assert.equal(run('positionTime'), end);
+  assert.ok(requests > 1);
+  assert.ok(run('sim.lon < -156 && sim.lat < 18.01'));
+  assert.ok(run('positionTrail.every((point, i) => i === 0 || point.lon <= positionTrail[i - 1].lon)'));
+});
+
+test('unavailable surface flight data pauses drift without using simulated wind', () => {
+  for (const mutation of ['openMeteoWeather.cache.clear()', 'daily.time = [0]',
+    'delete hourly.wind_speed_10m', 'hourly.wind_speed_10m[0] = -1',
+    'hourly.wind_direction_10m[0] = null', 'hourly.wind_direction_10m[0] = 361']) {
+    const run = app('open-meteo');
+    forecast(run, 27, 62);
+    run(mutation);
+    run(`readState(); Date.now = () => ${when + 60000}; readState()`);
+    assert.equal(run('sim.lon'), 0, mutation);
+    assert.equal(run('sim.lat'), 0, mutation);
+    assert.equal(run('sim.flightAvailable'), false, mutation);
+  }
+});
+
 test('overnight 1000 hPa movement retains elapsed time while fetching wind along the route', async () => {
   const fixture = app('open-meteo');
   forecast(fixture);

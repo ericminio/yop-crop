@@ -145,15 +145,15 @@ test('calm wind remains zero', () => {
   assert.equal(run('sim.drift'), 0);
 });
 
-test('missing coverage or invalid wind falls back to simulated wind', () => {
+test('missing coverage or invalid wind leaves the flight heading unavailable', () => {
   for (const mutation of [null, 'hourly.wind_speed_10m[0] = null',
     'delete hourly.wind_direction_10m', 'hourly.wind_speed_10m[0] = -1',
     'hourly.wind_direction_10m[0] = NaN', 'daily.time = [0]']) {
     const run = app('open-meteo');
     if (mutation) { forecast(run); run(mutation); }
     run('readState()');
-    assert.equal(run('sim.drift'), run('simulatedWeather.at(0, 0, Date.now()).wind_speed_10m'));
-    assert.equal(run('sim.hdg'), run('(simulatedWeather.at(0, 0, Date.now()).wind_direction_10m + 180) % 360'));
+    assert.equal(run('sim.flightAvailable'), false);
+    assert.equal(run('sim.drift'), 0);
   }
 });
 

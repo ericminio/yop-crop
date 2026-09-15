@@ -687,19 +687,19 @@
   }
 
   function flightAt(lat, lon, when) {
-    if (pressureLevel === null) {
+    if (pressureLevel === null && weather !== openMeteoWeather) {
       const wx = weather.at(lat, lon, when);
       return { speed: wx.wind_speed_10m, direction: wx.wind_direction_10m, altitude: null };
     }
     const row = weather === openMeteoWeather && openMeteoWeather.cache.get(openMeteoWeather.key(lat, lon));
     if (!row || !openMeteoWeather.covers(row, when)) return null;
     const h = nearestIndex(row.hourly.time, when / 1000);
-    const suffix = pressureLevel + 'hPa';
+    const suffix = pressureLevel === null ? '10m' : pressureLevel + 'hPa';
     const speed = row.hourly['wind_speed_' + suffix]?.[h];
     const direction = row.hourly['wind_direction_' + suffix]?.[h];
-    const altitude = row.hourly['geopotential_height_' + suffix]?.[h];
+    const altitude = pressureLevel === null ? null : row.hourly['geopotential_height_' + suffix]?.[h];
     if (!Number.isFinite(speed) || speed < 0 || !Number.isFinite(direction) ||
-        direction < 0 || direction > 360 || !Number.isFinite(altitude)) return null;
+        direction < 0 || direction > 360 || (pressureLevel !== null && !Number.isFinite(altitude))) return null;
     return { speed: speed, direction: direction, altitude: altitude };
   }
 
@@ -720,7 +720,7 @@
     const steps = Math.min(240, Math.ceil((now - positionTime) / 60000));
     const dt = (now - positionTime) / steps;
     for (let i = 0; i < steps; i++) {
-      if (pressureLevel !== null && weather === openMeteoWeather &&
+      if (weather === openMeteoWeather &&
           !openMeteoWeather.cache.has(openMeteoWeather.key(sim.lat, sim.lon))) {
         weather.prime([{ lat: sim.lat, lon: sim.lon }], (now - positionTime) / 86400000 + 2);
         return;
@@ -1592,16 +1592,18 @@
     mctx.moveTo(0, my); mctx.lineTo(mx - 11, my); mctx.moveTo(mx + 11, my); mctx.lineTo(W, my);
     mctx.moveTo(mx, 0); mctx.lineTo(mx, my - 11); mctx.moveTo(mx, my + 11); mctx.lineTo(mx, H);
     mctx.stroke();
-    const br = sim.hdg * D, arm = 12 + sim.drift * 0.9;
-    const ax = mx + Math.sin(br) * arm, ay = my - Math.cos(br) * arm;
-    mctx.strokeStyle = 'rgba(111,224,255,0.85)'; mctx.lineWidth = 1.4;
-    mctx.beginPath(); mctx.moveTo(mx, my); mctx.lineTo(ax, ay); mctx.stroke();
-    mctx.fillStyle = 'rgba(111,224,255,0.85)';
-    mctx.beginPath();
-    mctx.moveTo(ax + Math.sin(br) * 5, ay - Math.cos(br) * 5);
-    mctx.lineTo(ax + Math.sin(br + 2.4) * 5, ay - Math.cos(br + 2.4) * 5);
-    mctx.lineTo(ax + Math.sin(br - 2.4) * 5, ay - Math.cos(br - 2.4) * 5);
-    mctx.closePath(); mctx.fill();
+    if (sim.flightAvailable) {
+      const br = sim.hdg * D, arm = 12 + sim.drift * 0.9;
+      const ax = mx + Math.sin(br) * arm, ay = my - Math.cos(br) * arm;
+      mctx.strokeStyle = 'rgba(111,224,255,0.85)'; mctx.lineWidth = 1.4;
+      mctx.beginPath(); mctx.moveTo(mx, my); mctx.lineTo(ax, ay); mctx.stroke();
+      mctx.fillStyle = 'rgba(111,224,255,0.85)';
+      mctx.beginPath();
+      mctx.moveTo(ax + Math.sin(br) * 5, ay - Math.cos(br) * 5);
+      mctx.lineTo(ax + Math.sin(br + 2.4) * 5, ay - Math.cos(br + 2.4) * 5);
+      mctx.lineTo(ax + Math.sin(br - 2.4) * 5, ay - Math.cos(br - 2.4) * 5);
+      mctx.closePath(); mctx.fill();
+    }
     mctx.lineWidth = 1;
     mctx.strokeStyle = '#ffc861';
     mctx.beginPath(); mctx.arc(mx, my, 7, 0, Math.PI * 2); mctx.stroke();

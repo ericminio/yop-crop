@@ -10,8 +10,9 @@ its crops need.
 
 The default simulated adapter generates weather, including wind. Open
 `index.html?weather=open-meteo` to use Open-Meteo forecasts, with simulated
-conditions as the fallback when forecast coverage is unavailable. Missing wind
-samples also fall back to simulated wind.
+crop conditions as the fallback when surface forecast coverage is unavailable.
+Drift and the heading display only use forecast wind in Open-Meteo mode;
+missing or invalid wind pauses drift and hides the map's direction arrow.
 
 Cached forecasts refresh after 15 minutes, even when the platform is stationary.
 The last usable forecast remains available during refresh. Failed requests retry
@@ -34,6 +35,8 @@ Cached data remains usable during refresh under the existing cache policy.
 When drift reaches a location without a cached forecast, elapsed movement time
 is retained while that location's forecast loads. Catch-up continues with the
 selected level's wind after loading, including after an overnight tab suspension.
+This also applies to surface wind: crossing into an uncached location waits for
+its forecast instead of moving with simulated wind.
 Changing levels or manually relocating starts a new movement interval.
 
 Crop temperature, humidity and cloud cover also come from the selected level.
@@ -106,8 +109,8 @@ move the platform. An amber trail in the Position panel follows the route from
 the session's starting position to FF1, retaining a point each minute plus its
 live position. Clicking to relocate clears the trail and starts it there.
 After a suspended tab resumes, elapsed time is integrated in
-steps using weather along the route (simulated fallback in surface mode, paused
-drift for unavailable pressure-level data). Reloading starts a new session;
+steps using weather along the route, waiting for uncached route forecasts in
+Open-Meteo mode and pausing drift for unavailable wind samples. Reloading starts a new session;
 the flight path and selected level are not persisted.
 
 Run the weather and movement checks with `node --test tests/*.test.cjs`.
