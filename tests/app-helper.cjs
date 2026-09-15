@@ -11,7 +11,6 @@ function app(provider = 'simulated', fetch = async () => { throw Error('offline'
     URLSearchParams, location: { search: '?weather=' + provider }, fetch,
     Date: class extends Date { static now() { return when; } }
   });
-  // Load the actual adapter/state code without starting the canvas UI.
   vm.runInContext(script.slice(script.indexOf("  'use strict';"),
     script.indexOf('  function dayMs(')), context);
   return expression => vm.runInContext(expression, context);

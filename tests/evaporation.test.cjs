@@ -21,8 +21,6 @@ function evaporationForecast() {
 test('radiation at altitude produces positive daily evaporation independent of drift wind', () => {
   const run = evaporationForecast();
   const et = run('readState().et0');
-  // Independently evaluated FAO radiation terms for 11.52 MJ/m²/day,
-  // 20 °C, 60% RH, 850 hPa and 1500 m at the equator on 14 September.
   assert.ok(Math.abs(et - 2.2584297616) < 1e-8);
   run('hourly.wind_speed_850hPa = Array(25).fill(150); hourly.wind_direction_850hPa = Array(25).fill(270)');
   assert.equal(run('readState().et0'), et);
@@ -48,7 +46,6 @@ test('daily water demand applies crop stage and planted area, with unknown phase
   run(`const waterTracks = CROPS.map(() => ({sown: null, unknownFrom: null, segs: []}));`);
   assert.equal(run('waterDemand(waterTracks, 4, 2)'), 0);
   run('waterTracks[0] = {sown: 4, unknownFrom: null, segs: [{from: 4, to: 5, idx: 0}]}');
-  // Potato: 196 m² × initial-stage coefficient 0.50 × 2 mm/day = 196 litres/day.
   assert.equal(run('waterDemand(waterTracks, 4, 2)'), 0.196);
   run('waterTracks[0].segs[0].idx = 2');
   assert.ok(Math.abs(run('waterDemand(waterTracks, 4, 2)') - 0.4508) < 1e-10);
