@@ -6,7 +6,6 @@ function waterPanel() {
   const run = app();
   run(script.slice(script.indexOf('  function dayMs('), script.indexOf('  const canvas =')));
   run(script.slice(script.indexOf('  function formatWeather('), script.indexOf('  function updateHUD(')));
-  // Use the production panel renderer with lightweight text nodes, no canvas UI.
   run(`
     const el = Object.fromEntries(['wres', 'wdraw', 'et', 'wcap', 'wdays'].map(id => [id, {}]));
     const waterState = {missionDay: 4, et0: 2, wx: {evaporation_estimated: true, cloud_cover: 40}};
@@ -20,7 +19,6 @@ test('water panel shows estimated ET, draw and depletion time for planted potato
   const run = waterPanel();
   run('updateWaterPanel(waterState, waterTracks)');
   assert.equal(run('el.et.textContent'), '~2.0 mm/d');
-  // 196 m² × Kc .5 × 2 mm/d = .196 t/day; 9.6 t lasts about 49 days.
   assert.equal(run('el.wdraw.textContent'), '~0.20 t/d');
   assert.equal(run('el.wdays.textContent'), '~49.0 d');
   run('waterTracks[0].segs[0].idx = 2; updateWaterPanel(waterState, waterTracks)');

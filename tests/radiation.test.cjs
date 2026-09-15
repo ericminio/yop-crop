@@ -20,8 +20,6 @@ function radiationForecast() {
 
 test('daily crop light uses surface radiation adjusted by maximum cloud cover at or above the platform', () => {
   const run = radiationForecast();
-  // Surface transmission: .4. Above-platform maximum is 40%, transmission .7.
-  // 200 W/m² for one hour becomes 350 W/m², or 1.26 MJ/m² per day.
   assert.ok(Math.abs(run('readState().wx.shortwave_radiation_sum') - 1.26) < 1e-10);
   assert.ok(Math.abs(run('readState().dli') - run('1.26 * PAR_PER_MJ')) < 1e-10);
   run('hourly.cloud_cover_700hPa.fill(80)');
