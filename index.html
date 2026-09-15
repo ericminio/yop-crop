@@ -350,7 +350,7 @@
 
   const LAUNCH = Date.UTC(2026, 8, 10, 6, 0);
   const FORECAST_DAYS = 16;
-  const sim = { lat: 0, lon: 0, alt: 2, hdg: 68, drift: 17,
+  const sim = { lat: 0, lon: 0, alt: 2, hdg: 0, drift: 0,
                 fuel: 0.62, cloud: 0.22, water: 9.6 };
   let scrub = null;
   let nowDay = 0;
@@ -402,6 +402,7 @@
            : when <= now + FORECAST_DAYS * 86400000 ? 'forecast' : 'climatology';
     },
     at: function (latDeg, lonDeg, when) {
+      const missionDay = (when - LAUNCH) / 86400000;
       const solarMs = when + lonDeg / 15 * 3600000;
       const doy = doyOf(solarMs);
       const s = solar(latDeg, doy, 12);
@@ -437,7 +438,9 @@
         shortwave_radiation_sum: rs,
         daylight_duration: s.dayLen * 3600,
         et0_fao_evapotranspiration: et0,
-        cloud_cover: cloud * 100
+        cloud_cover: cloud * 100,
+        wind_speed_10m: 14 + Math.sin(missionDay / 2.7) * 7,
+        wind_direction_10m: 240 + Math.sin(missionDay / 4.1) * 22
       };
     }
   };
@@ -455,7 +458,8 @@
   const openMeteoWeather = {
     name: 'open-meteo',
     endpoint: 'https://api.open-meteo.com/v1/forecast',
-    hourly: ['temperature_2m','relative_humidity_2m','vapour_pressure_deficit','cloud_cover'],
+    hourly: ['temperature_2m','relative_humidity_2m','vapour_pressure_deficit','cloud_cover',
+             'wind_speed_10m','wind_direction_10m'],
     daily: ['temperature_2m_max','temperature_2m_min','shortwave_radiation_sum',
             'daylight_duration','et0_fao_evapotranspiration'],
     cache: new Map(),
@@ -475,6 +479,7 @@
         '&longitude=' + miss.map(function (pt) { return pt.lon.toFixed(4); }).join(',') +
         '&hourly=' + this.hourly.join(',') +
         '&daily=' + this.daily.join(',') +
+        '&wind_speed_unit=kmh' +
         '&past_days=' + back +
         '&forecast_days=' + FORECAST_DAYS + '&timeformat=unixtime&timezone=UTC')
         .then(function (r) { return r.json(); })
@@ -503,6 +508,11 @@
       const sec = when / 1000;
       const h = nearestIndex(row.hourly.time, sec);
       const d = nearestIndex(row.daily.time, sec);
+      const speed = row.hourly.wind_speed_10m?.[h];
+      const direction = row.hourly.wind_direction_10m?.[h];
+      const wind = Number.isFinite(speed) && speed >= 0 && Number.isFinite(direction)
+        ? { wind_speed_10m: speed, wind_direction_10m: direction }
+        : simulatedWeather.at(lat, lon, when);
       return {
         temperature_2m: row.hourly.temperature_2m[h],
         temperature_2m_max: row.daily.temperature_2m_max[d],
@@ -512,7 +522,9 @@
         shortwave_radiation_sum: row.daily.shortwave_radiation_sum[d],
         daylight_duration: row.daily.daylight_duration[d],
         et0_fao_evapotranspiration: row.daily.et0_fao_evapotranspiration[d],
-        cloud_cover: row.hourly.cloud_cover[h]
+        cloud_cover: row.hourly.cloud_cover[h],
+        wind_speed_10m: wind.wind_speed_10m,
+        wind_direction_10m: wind.wind_direction_10m
       };
     }
   };
@@ -548,6 +560,9 @@
     const solarHours = localSolar(utcHours, sim.lon);
     const s = solar(sim.lat, doy, solarHours);
     const wx = weather.at(sim.lat, sim.lon, now);
+    sim.drift = wx.wind_speed_10m;
+    // Meteorological wind comes FROM this bearing; the platform drifts TO its opposite.
+    sim.hdg = (wx.wind_direction_10m + 180) % 360;
 
     return { now: now, d: d, lst: solarHours, doy: doy, missionDay: missionDay,
              sun: s, wx: wx,
@@ -604,8 +619,9 @@
 
   function candidateOutlooks(lat, lon, now, missionDay, endDay) {
     const crop = CROPS[SCORE_CROP];
+    // Ignore sub-0.01 km/h changes so smooth simulated wind does not rebuild tracks every frame.
     const key = [weather.name, weather.cache ? weather.cache.size : 0,
-                 lat.toFixed(2), lon.toFixed(2), Math.floor(missionDay)].join('|');
+                 lat.toFixed(2), lon.toFixed(2), Math.floor(missionDay), sim.drift.toFixed(2)].join('|');
     if (outlook.key === key) return outlook.rows;
     outlook.key = key;
     outlook.rows = CANDIDATES.map(function (cd) {
@@ -1737,8 +1753,6 @@
     const markDay = scrub === null ? st.missionDay : scrub;
     sim.cloud = st.wx.cloud_cover / 100;
     weather.prime(scoringPoints(), st.missionDay + 2);
-    sim.hdg = 60 + Math.sin(st.missionDay/4.1)*22;
-    sim.drift = 14 + Math.sin(st.missionDay/2.7)*7;
 
     const w = window.innerWidth, h = window.innerHeight, e = st.sun.elev;
     const k0 = Math.max(0.30, Math.min(1, (e+9)/26));

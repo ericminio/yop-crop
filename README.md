@@ -6,6 +6,21 @@ its crops need.
 
 `index.html` renders the platform.
 
+## Weather adapters
+
+The default simulated adapter generates weather, including wind. Open
+`index.html?weather=open-meteo` to use Open-Meteo forecasts, with simulated
+conditions as the fallback when forecast coverage is unavailable. Missing wind
+samples also fall back to simulated wind.
+
+Both adapters expose 10 m wind speed in km/h and wind direction in degrees
+(the bearing the wind comes from). The platform uses that speed for drift and
+arrival estimates, and the opposite bearing for heading. This uses surface wind
+as a drift approximation; it does not model winds at flight altitude or route
+feasibility. Simulated wind preserves the existing variation with mission time.
+
+Run the adapter checks with `node --test tests/weather.test.cjs`.
+
 ## Design premise
 
 The platform has no fixed season. It flies to stay in the air temperature its crops
