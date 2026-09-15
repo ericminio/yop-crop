@@ -6,6 +6,35 @@ its crops need.
 
 `index.html` renders the platform.
 
+## Weather adapters
+
+The default simulated adapter generates weather, including wind. Open
+`index.html?weather=open-meteo` to use Open-Meteo forecasts, with simulated
+conditions as the fallback when forecast coverage is unavailable. Missing wind
+samples also fall back to simulated wind.
+
+Cached forecasts refresh after 15 minutes, even when the platform is stationary.
+The last usable forecast remains available during refresh. Failed requests retry
+after one minute. These checks run when animation frames run, so returning to a
+suspended tab also triggers any overdue refresh.
+
+Both adapters expose 10 m wind speed in km/h and wind direction in degrees
+(the bearing the wind comes from). The platform uses that speed for drift and
+arrival estimates, and the opposite bearing for heading. This uses surface wind
+as a drift approximation; it does not model winds at flight altitude or route
+feasibility. Simulated wind preserves the existing variation with mission time.
+
+Position advances in real time with the selected adapter's wind, starting from
+the initial position. Selecting a new position resets the movement clock there.
+The map and coordinates follow the drift; scrubbing the crop timeline does not
+move the platform. After a suspended tab resumes, elapsed time is integrated in
+steps using weather along the route (simulated fallback where forecasts are not
+cached). Reloading starts a new session; the flight path is not persisted.
+
+Run the weather and movement checks with `node --test tests/*.test.cjs`.
+The `Tests` GitHub Actions check runs both suites on every pull request and on
+pushes to `dev`, using Node.js 22.
+
 ## Design premise
 
 The platform has no fixed season. It flies to stay in the air temperature its crops
