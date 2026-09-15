@@ -463,16 +463,24 @@
     daily: ['temperature_2m_max','temperature_2m_min','shortwave_radiation_sum',
             'daylight_duration','et0_fao_evapotranspiration'],
     cache: new Map(),
+    fetchedAt: new Map(),
+    revision: 0,
+    refreshMs: 15 * 60000,
+    retryAt: 0,
     pending: false,
     key: function (lat, lon) { return lat.toFixed(2) + ',' + lon.toFixed(2); },
     prime: function (points, pastDays) {
-      if (this.pending) return;
+      const now = Date.now();
+      if (this.pending || now < this.retryAt) return;
       const self = this;
       const miss = points.filter(function (pt) {
-        return !self.cache.has(self.key(pt.lat, pt.lon));
+        const key = self.key(pt.lat, pt.lon);
+        return !self.cache.has(key) || !self.fetchedAt.has(key) ||
+          now - self.fetchedAt.get(key) >= self.refreshMs;
       });
       if (!miss.length) return;
       this.pending = true;
+      this.retryAt = now + 60000;
       const back = Math.max(1, Math.min(92, Math.ceil(pastDays || 1)));
       fetch(this.endpoint +
         '?latitude=' + miss.map(function (pt) { return pt.lat.toFixed(4); }).join(',') +
@@ -482,16 +490,29 @@
         '&wind_speed_unit=kmh' +
         '&past_days=' + back +
         '&forecast_days=' + FORECAST_DAYS + '&timeformat=unixtime&timezone=UTC')
-        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          if (!r.ok) throw new Error('Weather request failed');
+          return r.json();
+        })
         .then(function (body) {
           const rows = Array.isArray(body) ? body : [body];
+          let loaded = 0;
           rows.forEach(function (row, i) {
-            if (row && row.hourly && miss[i])
-              self.cache.set(self.key(miss[i].lat, miss[i].lon), row);
+            if (row && row.hourly?.time?.length && row.daily?.time?.length && miss[i]) {
+              const key = self.key(miss[i].lat, miss[i].lon);
+              self.cache.set(key, row);
+              self.fetchedAt.set(key, Date.now());
+              self.revision++;
+              loaded++;
+            }
           });
+          self.retryAt = loaded === miss.length ? 0 : Date.now() + 60000;
           self.pending = false;
         })
-        .catch(function () { self.pending = false; });
+        .catch(function () {
+          self.retryAt = Date.now() + 60000;
+          self.pending = false;
+        });
     },
     covers: function (row, when) {
       const t = row.daily.time, sec = when / 1000;
@@ -648,7 +669,7 @@
   function candidateOutlooks(lat, lon, now, missionDay, endDay) {
     const crop = CROPS[SCORE_CROP];
     // Ignore sub-0.01 km/h changes so smooth simulated wind does not rebuild tracks every frame.
-    const key = [weather.name, weather.cache ? weather.cache.size : 0,
+    const key = [weather.name, weather.revision || 0,
                  lat.toFixed(2), lon.toFixed(2), Math.floor(missionDay), sim.drift.toFixed(2)].join('|');
     if (outlook.key === key) return outlook.rows;
     outlook.key = key;
@@ -669,7 +690,7 @@
   }
 
   function tracksFor(lat, lon, missionDay, fromDay, endDay) {
-    const primed = weather.cache ? weather.cache.size : 0;
+    const primed = weather.revision || 0;
     const key = [weather.name, primed, lat.toFixed(2), lon.toFixed(2),
                  Math.floor(missionDay), Math.floor(fromDay), Math.ceil(endDay),
                  sown.join(',')].join('|');

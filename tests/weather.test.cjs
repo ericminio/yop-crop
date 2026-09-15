@@ -1,9 +1,67 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
-const { app, forecast, script } = require('./app-helper.cjs');
+const { app, forecast, script, when } = require('./app-helper.cjs');
+
+test('refreshes an expired forecast while the farm remains stationary', async () => {
+  const requests = [];
+  const fixture = app();
+  forecast(fixture, 0, 270);
+  const row = JSON.parse(fixture("JSON.stringify(openMeteoWeather.cache.get('0.00,0.00'))"));
+  row.hourly.wind_speed_10m = [0, 0];
+  const run = app('open-meteo', async url => {
+    requests.push(new URL(url));
+    const response = structuredClone(row);
+    if (requests.length > 1) response.hourly.wind_speed_10m = [20, 20];
+    return { ok: true, json: async () => response };
+  });
+  const prime = async () => {
+    run('openMeteoWeather.prime([{lat: sim.lat, lon: sim.lon}], 2)');
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  await prime();
+  run('readState()');
+  assert.equal(run('sim.drift'), 0);
+  run(`Date.now = () => ${when + 15 * 60000 - 1}; readState()`);
+  await prime();
+  assert.equal(requests.length, 1);
+  run(`Date.now = () => ${when + 15 * 60000}; readState()`);
+  assert.equal(run('sim.lat'), 0);
+  assert.equal(run('sim.lon'), 0);
+  await prime();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].search, requests[1].search);
+  run('readState()');
+  assert.equal(run('sim.drift'), 20);
+});
 
 test('page script parses', () => { new vm.Script(script); });
+
+test('failed refresh keeps cached wind and waits a minute before retrying', async () => {
+  for (const failure of ['network', 'http', 'invalid body']) {
+    let requests = 0;
+    const run = app('open-meteo', async () => {
+      requests++;
+      if (failure === 'network') throw new Error('offline');
+      return { ok: failure !== 'http', json: async () => ({ error: true }) };
+    });
+    forecast(run, 12, 270);
+    const prime = async () => {
+      run('openMeteoWeather.prime([{lat: 0, lon: 0}], 2)');
+      await new Promise(resolve => setImmediate(resolve));
+    };
+    await prime();
+    run('readState()');
+    assert.equal(run('sim.drift'), 12);
+    run(`Date.now = () => ${when + 59999}`);
+    await prime();
+    assert.equal(requests, 1);
+    run(`Date.now = () => ${when + 60000}`);
+    await prime();
+    assert.equal(requests, 2);
+    assert.equal(run('openMeteoWeather.at(0, 0, Date.now()).wind_speed_10m'), 12);
+  }
+});
 
 test('simulated wind drives speed and heading and varies with time', () => {
   const run = app();
@@ -54,7 +112,7 @@ test('forecast request includes both wind fields and explicit km/h units', async
   let url;
   const run = app('open-meteo', async value => {
     url = new URL(value);
-    return { json: async () => ({}) };
+    return { ok: true, json: async () => ({}) };
   });
   run('openMeteoWeather.prime([{lat: 0, lon: 0}], 2)');
   assert.equal(url.searchParams.get('wind_speed_unit'), 'kmh');

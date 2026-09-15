@@ -13,6 +13,11 @@ The default simulated adapter generates weather, including wind. Open
 conditions as the fallback when forecast coverage is unavailable. Missing wind
 samples also fall back to simulated wind.
 
+Cached forecasts refresh after 15 minutes, even when the platform is stationary.
+The last usable forecast remains available during refresh. Failed requests retry
+after one minute. These checks run when animation frames run, so returning to a
+suspended tab also triggers any overdue refresh.
+
 Both adapters expose 10 m wind speed in km/h and wind direction in degrees
 (the bearing the wind comes from). The platform uses that speed for drift and
 arrival estimates, and the opposite bearing for heading. This uses surface wind
