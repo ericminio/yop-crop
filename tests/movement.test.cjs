@@ -6,6 +6,33 @@ function steadyWind(run, speed, direction) {
   run(`weather = { at: () => ({ wind_speed_10m: ${speed}, wind_direction_10m: ${direction} }) }`);
 }
 
+test('overnight 1000 hPa movement retains elapsed time while fetching wind along the route', async () => {
+  const fixture = app('open-meteo');
+  forecast(fixture);
+  fixture(`
+    hourly.wind_speed_1000hPa = [24, 24];
+    hourly.wind_direction_1000hPa = [270, 270];
+    hourly.geopotential_height_1000hPa = [100, 100];
+  `);
+  const row = JSON.parse(fixture("JSON.stringify(openMeteoWeather.cache.get('0.00,0.00'))"));
+  let requests = 0;
+  const run = app('open-meteo', async () => {
+    requests++;
+    return { ok: true, json: async () => structuredClone(row) };
+  });
+  run(`openMeteoWeather.cache.set('0.00,0.00', ${JSON.stringify(row)}); selectPressureLevel(1000)`);
+  const end = when + 8 * 3600000;
+  run(`Date.now = () => ${end}; readState()`);
+  assert.ok(run('positionTime') < end);
+  for (let i = 0; i < 1000 && run('positionTime') < end; i++) {
+    await new Promise(resolve => setImmediate(resolve));
+    run('readState()');
+  }
+  assert.equal(run('positionTime'), end);
+  assert.ok(requests > 1);
+  assert.ok(Math.abs(run('sim.lon * Math.PI / 180 * 6371') - 192) < 1e-7);
+});
+
 test('selecting another pressure level changes drift to that level wind', () => {
   const run = app('open-meteo');
   forecast(run);

@@ -31,6 +31,10 @@ finishes elapsed movement at the previous level, then switches wind without
 changing horizontal position. Missing or invalid selected-level wind or height
 pauses drift and displays unavailable data, rather than substituting surface wind.
 Cached data remains usable during refresh under the existing cache policy.
+When drift reaches a location without a cached forecast, elapsed movement time
+is retained while that location's forecast loads. Catch-up continues with the
+selected level's wind after loading, including after an overnight tab suspension.
+Changing levels or manually relocating starts a new movement interval.
 
 Crop temperature, humidity and cloud cover also come from the selected level.
 VPD is derived from its temperature and relative humidity. Daily temperature
