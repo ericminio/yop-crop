@@ -355,6 +355,8 @@
   const FORECAST_DAYS = 16;
   const PRESSURE_LEVELS = [1000, 975, 950, 925, 900, 850, 800, 700, 600,
                          500, 400, 300, 250, 200, 150, 100, 70, 50, 30];
+  // Heuristic: fully overcast skies transmit 25% of incoming sunlight.
+  const CLOUD_BLOCKING = 0.75;
   let pressureLevel = null;
   const sim = { lat: 0, lon: 0, alt: null, hdg: 0, drift: 0,
                 fuel: 0.62, cloud: 0.22, water: 9.6 };
@@ -464,7 +466,7 @@
   const openMeteoWeather = {
     name: 'open-meteo',
     endpoint: 'https://api.open-meteo.com/v1/forecast',
-    hourly: ['temperature_2m','relative_humidity_2m','vapour_pressure_deficit','cloud_cover',
+    hourly: ['temperature_2m','relative_humidity_2m','vapour_pressure_deficit','cloud_cover','shortwave_radiation',
              'wind_speed_10m','wind_direction_10m'].concat(PRESSURE_LEVELS.flatMap(function (level) {
       return ['wind_speed_', 'wind_direction_', 'geopotential_height_',
               'temperature_', 'relative_humidity_', 'cloud_cover_'].map(function (field) {
@@ -586,6 +588,39 @@
 
   let positionTime = null;
 
+  function estimatedRadiationDay(row, lat, lon, day) {
+    if (!row) return NaN;
+    let energy = 0;
+    // Radiation is the mean of the preceding hour: 01:00 through next 00:00
+    // cover this UTC day. Use each interval's midpoint for the sunlight bound.
+    for (let hour = 1; hour <= 24; hour++) {
+      const end = day + hour * 3600;
+      const i = row.hourly.time.indexOf(end);
+      if (i < 0) return NaN;
+      const mid = (end - 1800) * 1000;
+      const doy = doyOf(mid);
+      const elev = solar(lat, doy, localSolar(hour - 0.5, lon)).elev;
+      const incoming = 1361 * (1 + 0.033 * Math.cos(2 * Math.PI * doy / 365)) *
+                       Math.max(0, Math.sin(elev * D));
+      if (incoming === 0) continue;
+      const radiation = row.hourly.shortwave_radiation?.[i];
+      const surfaceCloud = row.hourly.cloud_cover?.[i];
+      const validCloud = v => Number.isFinite(v) && v >= 0 && v <= 100;
+      if (!Number.isFinite(radiation) || radiation < 0 || !validCloud(surfaceCloud)) return NaN;
+      let overhead = 0;
+      for (const level of PRESSURE_LEVELS) {
+        if (level > pressureLevel) continue;
+        const cloud = row.hourly['cloud_cover_' + level + 'hPa']?.[i];
+        if (!validCloud(cloud)) return NaN;
+        overhead = Math.max(overhead, cloud);
+      }
+      const ratio = (1 - CLOUD_BLOCKING * overhead / 100) /
+                    (1 - CLOUD_BLOCKING * surfaceCloud / 100);
+      energy += Math.min(incoming, radiation * ratio) * 0.0036; // W/m²-hour to MJ/m²
+    }
+    return energy;
+  }
+
   function pressureWeatherAt(lat, lon, when) {
     const row = openMeteoWeather.cache.get(openMeteoWeather.key(lat, lon));
     const day = Math.floor(when / 86400000) * 86400;
@@ -616,7 +651,8 @@
       vapour_pressure_deficit: svp(temp) * (1 - rh / 100),
       cloud_cover: clouds >= 0 && clouds <= 100 ? clouds : NaN,
       daylight_duration: solar(lat, doyOf(when), 12).dayLen * 3600,
-      shortwave_radiation_sum: NaN,
+      shortwave_radiation_sum: estimatedRadiationDay(row, lat, lon, day),
+      radiation_estimated: true,
       et0_fao_evapotranspiration: NaN
     };
   }
@@ -1779,6 +1815,8 @@
     el.lstnow.textContent = hhmm(st.lst);
     el.elev.textContent = st.sun.elev.toFixed(0);
     el.dli.textContent = formatWeather(st.dli, 0);
+    el.dli.title = st.wx.radiation_estimated ? 'Estimated from surface radiation and maximum cloud cover overhead' : '';
+    if (st.wx.radiation_estimated && Number.isFinite(st.dli)) el.dli.textContent = '~' + el.dli.textContent;
     el.mkrise.style.left = (st.sun.rise/24*100)+'%';
     el.mkset.style.left = (st.sun.set/24*100)+'%';
     el.mknow.style.left = (st.lst/24*100)+'%';
@@ -1944,7 +1982,7 @@
   function weatherNote() {
     return (weather === simulatedWeather ? 'simulated conditions' : 'open-meteo forecast') +
            (pressureLevel === null ? ' \u00b7 mission clock is real \u00b7 drifting with wind'
-             : ' \u00b7 ' + pressureLevel + ' hPa wind & crop weather \u00b7 light and evaporation unavailable');
+             : ' \u00b7 ' + pressureLevel + ' hPa wind & crop weather \u00b7 light estimated \u00b7 evaporation unavailable');
   }
 
   function askPosition() {

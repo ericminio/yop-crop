@@ -41,9 +41,27 @@ level, not a persisted history of previously flown levels.
 
 Missing pressure-level crop weather stays unavailable, including beyond forecast
 coverage. Crop projections end at the first missing day without reporting a
-thermal stall. Open-Meteo does not provide pressure-level solar radiation or
-reference evaporation: DLI, irrigation estimates and overall suitability scores
-are shown as unavailable at altitude. Day length still uses solar geometry.
+thermal stall. Radiation at altitude is estimated hourly from surface radiation:
+
+`radiation aloft = surface radiation × (1 − 0.75 × cloud overhead) / (1 − 0.75 × surface cloud)`
+
+Cloud fractions run from 0 to 1. Overhead cloud is the maximum across the selected
+pressure level and every supplied level above it; clouds below are excluded.
+The 0.75 blocking strength is an uncalibrated assumption: an overcast layer still
+transmits 25%. The resulting ratio stays between 0.25 and 4. Each hourly estimate
+is capped at incoming extraterrestrial sunlight on a horizontal plane, evaluated
+at the interval midpoint, and set to zero at night. The cap is a simple bound,
+not a clear-sky atmospheric model. The 24 hourly estimates are integrated to
+MJ/m²/day, respecting Open-Meteo's preceding-hour radiation timestamps.
+
+This model assumes overlapping cloud layers and does not know cloud opacity,
+thickness, scattering or reflection. Surface total cloud and pressure-level
+cloud estimates may disagree. Complete hourly coverage and valid daytime cloud
+and radiation data are required; missing data remains unavailable. Estimated
+radiation supplies crop DLI and suitability scores; header DLI is prefixed `~`.
+Day length still uses solar geometry. Reference evaporation and irrigation
+estimates remain unavailable at altitude; this change does not add an evaporation
+model. Relative wind remains assumed zero for a platform drifting with the air.
 There is no model of ascent/descent, terrain clearance or route feasibility.
 The pressure levels and variables are documented in the
 [Open-Meteo forecast API](https://open-meteo.com/en/docs#pressure-level-variables).

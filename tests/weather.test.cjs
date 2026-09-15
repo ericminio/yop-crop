@@ -168,6 +168,7 @@ test('forecast request includes both wind fields and explicit km/h units', async
   const fields = url.searchParams.get('hourly').split(',');
   assert.ok(fields.includes('wind_speed_10m'));
   assert.ok(fields.includes('wind_direction_10m'));
+  assert.ok(fields.includes('shortwave_radiation'));
   for (const level of [900, 850]) {
     for (const field of ['wind_speed_', 'wind_direction_', 'geopotential_height_',
       'temperature_', 'relative_humidity_', 'cloud_cover_']) {
