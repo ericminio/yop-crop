@@ -37,6 +37,55 @@ test('refreshes an expired forecast while the farm remains stationary', async ()
 
 test('page script parses', () => { new vm.Script(script); });
 
+test('crop thermal and moisture conditions follow the selected pressure level', () => {
+  const run = app('open-meteo');
+  forecast(run);
+  run(`
+    hourly.time = Array.from({length: 24}, (_, i) => ${when / 1000 - 43200} + i * 3600);
+    hourly.temperature_2m = Array(24).fill(35);
+    hourly.relative_humidity_2m = Array(24).fill(15);
+    for (const [level, low, high, rh] of [[900, 20, 28, 40], [850, 10, 18, 80]]) {
+      hourly['temperature_' + level + 'hPa'] = Array.from({length: 24}, (_, i) => i < 12 ? low : high);
+      hourly['relative_humidity_' + level + 'hPa'] = Array(24).fill(rh);
+      hourly['cloud_cover_' + level + 'hPa'] = Array(24).fill(60);
+    }
+    selectPressureLevel(900);
+  `);
+  assert.equal(run('readState().temp'), 28);
+  assert.equal(run('readState().rh'), 40);
+  assert.equal(run('axesOf(readState().wx, {tBase: 5}).gddRate'), 19);
+  const warmVpd = run('readState().vpd');
+  run('selectPressureLevel(850)');
+  assert.equal(run('readState().temp'), 18);
+  assert.equal(run('readState().rh'), 80);
+  assert.equal(run('axesOf(readState().wx, {tBase: 5}).gddRate'), 9);
+  assert.equal(run('axesOf(readState().wx, {tBase: 5}).nightMin'), 10);
+  assert.ok(Math.abs(run('readState().vpd') - 0.413) < 0.001);
+  assert.ok(run('readState().vpd') < warmVpd);
+  assert.equal(run('readState().wx.cloud_cover'), 60);
+  assert.equal(run('Number.isNaN(readState().et0)'), true);
+  assert.equal(run('Number.isNaN(readState().dli)'), true);
+  run(script.slice(script.indexOf('  function dayMs('), script.indexOf('  const canvas =')));
+  run('sown[0] = 4');
+  const coolRate = run('tracksFor(0, 0, 4, 4, 6)[0].rate[4]');
+  assert.equal(run('tracksFor(0, 0, 4, 4, 6)[0].unknownFrom'), 5);
+  assert.equal(run('tracksFor(0, 0, 4, 4, 6)[0].stall'), null);
+  run('selectPressureLevel(900)');
+  assert.equal(run('tracksFor(0, 0, 4, 4, 6)[0].rate[4]') - coolRate, 10);
+  assert.equal(run('phaseAt(tracksFor(0, 0, 4, 4, 6)[0], 5).phase'), 'weather unavailable');
+});
+
+test('missing pressure-level crop data never falls back to surface weather', () => {
+  const run = app('open-meteo');
+  forecast(run);
+  run('selectPressureLevel(850); delete hourly.temperature_850hPa; delete hourly.relative_humidity_850hPa');
+  assert.equal(run('Number.isNaN(readState().temp)'), true);
+  assert.equal(run('Number.isNaN(readState().vpd)'), true);
+  assert.equal(run('Number.isNaN(axesOf(readState().wx, {tBase: 5}).gddRate)'), true);
+  run('openMeteoWeather.cache.clear()');
+  assert.equal(run('Number.isNaN(readState().temp)'), true);
+});
+
 test('failed refresh keeps cached wind and waits a minute before retrying', async () => {
   for (const failure of ['network', 'http', 'invalid body']) {
     let requests = 0;
@@ -119,6 +168,13 @@ test('forecast request includes both wind fields and explicit km/h units', async
   const fields = url.searchParams.get('hourly').split(',');
   assert.ok(fields.includes('wind_speed_10m'));
   assert.ok(fields.includes('wind_direction_10m'));
+  assert.ok(fields.includes('shortwave_radiation'));
+  for (const level of [900, 850]) {
+    for (const field of ['wind_speed_', 'wind_direction_', 'geopotential_height_',
+      'temperature_', 'relative_humidity_', 'cloud_cover_']) {
+      assert.ok(fields.includes(field + level + 'hPa'));
+    }
+  }
 });
 
 test('arrival estimates refresh when wind speed changes at the same location', () => {

@@ -18,18 +18,90 @@ The last usable forecast remains available during refresh. Failed requests retry
 after one minute. These checks run when animation frames run, so returning to a
 suspended tab also triggers any overdue refresh.
 
-Both adapters expose 10 m wind speed in km/h and wind direction in degrees
-(the bearing the wind comes from). The platform uses that speed for drift and
-arrival estimates, and the opposite bearing for heading. This uses surface wind
-as a drift approximation; it does not model winds at flight altitude or route
-feasibility. Simulated wind preserves the existing variation with mission time.
+Surface wind (10 m) remains the default drift approximation. In Open-Meteo mode,
+the Flight level selector also offers the 19 discrete pressure levels from
+1000 to 30 hPa. Drift and arrival estimates use the selected level's wind speed;
+heading is opposite the meteorological wind direction (the bearing wind comes
+from). Wind is never blended between levels. Simulated wind preserves the
+existing variation with mission time; pressure selection requires Open-Meteo.
+
+The altitude display uses the selected level's forecast geopotential height in
+metres above sea level (ASL), which varies with place and time. Changing levels
+finishes elapsed movement at the previous level, then switches wind without
+changing horizontal position. Missing or invalid selected-level wind or height
+pauses drift and displays unavailable data, rather than substituting surface wind.
+Cached data remains usable during refresh under the existing cache policy.
+
+Crop temperature, humidity and cloud cover also come from the selected level.
+VPD is derived from its temperature and relative humidity. Daily temperature
+extremes require all 24 hourly samples of that UTC day; these extremes drive
+thermal growth and crop needs. Switching levels recalculates crop tracks and
+candidate outlooks at that level. Tracks are scenarios for the currently selected
+level, not a persisted history of previously flown levels.
+
+Missing pressure-level crop weather stays unavailable, including beyond forecast
+coverage. Crop projections end at the first missing day without reporting a
+thermal stall. Radiation at altitude is estimated hourly from surface radiation:
+
+`radiation aloft = surface radiation × (1 − 0.75 × cloud overhead) / (1 − 0.75 × surface cloud)`
+
+Cloud fractions run from 0 to 1. Overhead cloud is the maximum across the selected
+pressure level and every supplied level above it; clouds below are excluded.
+The 0.75 blocking strength is an uncalibrated assumption: an overcast layer still
+transmits 25%. The resulting ratio stays between 0.25 and 4. Each hourly estimate
+is capped at incoming extraterrestrial sunlight on a horizontal plane, evaluated
+at the interval midpoint, and set to zero at night. The cap is a simple bound,
+not a clear-sky atmospheric model. The 24 hourly estimates are integrated to
+MJ/m²/day, respecting Open-Meteo's preceding-hour radiation timestamps.
+
+This model assumes overlapping cloud layers and does not know cloud opacity,
+thickness, scattering or reflection. Surface total cloud and pressure-level
+cloud estimates may disagree. Complete hourly coverage and valid daytime cloud
+and radiation data are required; missing data remains unavailable. Estimated
+radiation supplies crop DLI and suitability scores; header DLI is prefixed `~`.
+Day length still uses solar geometry.
+
+### Estimated water demand at altitude
+
+Reference evaporation uses a daily FAO-56-style calculation adapted to zero
+relative wind: `ET = max(0, 0.408 × Δ × Rn / (Δ + γ))`, in mm/day.
+Temperature sets the saturation-pressure slope Δ; γ uses the selected pressure
+in kPa. Net radiation Rn is absorbed shortwave radiation (albedo 0.23) minus
+estimated outgoing longwave radiation. Longwave uses daily temperature extremes,
+mean actual vapour pressure from hourly temperature/RH pairs, and the ratio of
+estimated radiation to a clear-sky estimate at the mean forecast altitude.
+That ratio is clamped to 0.3–1; the clear-sky transmission is capped at 1.
+
+Relative wind is exactly zero for the drifting platform: the aerodynamic VPD
+term vanishes, with no minimum wind or substitution of drift speed. Humidity
+still affects the longwave estimate. Daily heat storage is assumed zero and
+negative net evaporation is clipped to zero (no condensation estimate).
+Complete daily temperature, humidity, height and radiation inputs are required.
+This adaptation is uncalibrated for a flying deck, especially at extreme
+altitudes, and does not model leaf temperature, natural convection, soil-water
+stress or irrigation efficiency. Equations are based on
+[FAO-56 reference evaporation](https://www.fao.org/4/X0490E/x0490e06.htm) and
+[net radiation](https://www.fao.org/4/X0490E/x0490e07.htm).
+
+Deck water demand sums `ET × crop-stage coefficient × planted area`.
+One mm over one m² is one litre; the panel converts litres to tonnes of water.
+Reference ET, deck draw and days to dry carry `~` when estimated at altitude.
+Empty beds and turnaround have no crop demand; an unknown planted crop phase
+leaves demand unavailable. Days to dry uses current water divided by current
+daily draw, with no depletion at zero draw. It is a constant-demand projection,
+not a water-budget simulation; it does not deduct rain/cloud capture or update
+the stored water over time.
+There is no model of ascent/descent, terrain clearance or route feasibility.
+The pressure levels and variables are documented in the
+[Open-Meteo forecast API](https://open-meteo.com/en/docs#pressure-level-variables).
 
 Position advances in real time with the selected adapter's wind, starting from
 the initial position. Selecting a new position resets the movement clock there.
 The map and coordinates follow the drift; scrubbing the crop timeline does not
 move the platform. After a suspended tab resumes, elapsed time is integrated in
-steps using weather along the route (simulated fallback where forecasts are not
-cached). Reloading starts a new session; the flight path is not persisted.
+steps using weather along the route (simulated fallback in surface mode, paused
+drift for unavailable pressure-level data). Reloading starts a new session;
+the flight path and selected level are not persisted.
 
 Run the weather and movement checks with `node --test tests/*.test.cjs`.
 The `Tests` GitHub Actions check runs both suites on every pull request and on
