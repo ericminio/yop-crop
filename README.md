@@ -19,6 +19,13 @@ arrival estimates, and the opposite bearing for heading. This uses surface wind
 as a drift approximation; it does not model winds at flight altitude or route
 feasibility. Simulated wind preserves the existing variation with mission time.
 
+Position advances in real time with the selected adapter's wind, starting from
+the initial position. Selecting a new position resets the movement clock there.
+The map and coordinates follow the drift; scrubbing the crop timeline does not
+move the platform. After a suspended tab resumes, elapsed time is integrated in
+steps using weather along the route (simulated fallback where forecasts are not
+cached). Reloading starts a new session; the flight path is not persisted.
+
 Run the adapter checks with `node --test tests/weather.test.cjs`.
 
 ## Design premise
