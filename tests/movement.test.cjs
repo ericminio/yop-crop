@@ -6,6 +6,30 @@ function steadyWind(run, speed, direction) {
   run(`weather = { at: () => ({ wind_speed_10m: ${speed}, wind_direction_10m: ${direction} }) }`);
 }
 
+test('selecting another pressure level changes drift to that level wind', () => {
+  const run = app('open-meteo');
+  forecast(run);
+  run(`
+    hourly.wind_speed_900hPa = [24, 24];
+    hourly.wind_direction_900hPa = [270, 270];
+    hourly.geopotential_height_900hPa = [980, 980];
+    hourly.wind_speed_850hPa = [12, 12];
+    hourly.wind_direction_850hPa = [90, 90];
+    hourly.geopotential_height_850hPa = [1480, 1480];
+    selectPressureLevel(900);
+    Date.now = () => ${when + 60000}; readState();
+  `);
+  const east = run('sim.lon');
+  assert.ok(Math.abs(east * Math.PI / 180 * 6371 - 0.4) < 1e-8);
+  run('selectPressureLevel(850); readState()');
+  assert.equal(run('sim.alt'), 1480);
+  assert.equal(run('sim.lon'), east);
+  assert.equal(run('sim.hdg'), 270);
+  assert.equal(run('sim.drift'), 12);
+  run(`Date.now = () => ${when + 120000}; readState()`);
+  assert.ok(Math.abs((east - run('sim.lon')) * Math.PI / 180 * 6371 - 0.2) < 1e-8);
+});
+
 test('position starts here and now, then travels the expected distance in real time', () => {
   const run = app();
   steadyWind(run, 60, 270);
@@ -14,6 +38,35 @@ test('position starts here and now, then travels the expected distance in real t
   run(`Date.now = () => ${when + 3600000}; readState()`);
   assert.ok(Math.abs(run('sim.lon') - 0.53959296) < 0.000001);
   assert.ok(Math.abs(run('sim.lat')) < 0.000001);
+});
+
+test('switching levels settles elapsed movement using the previous wind', () => {
+  const run = app('open-meteo');
+  forecast(run, 24, 270);
+  run('readState()');
+  run(`Date.now = () => ${when + 60000}; selectPressureLevel(850)`);
+  assert.ok(Math.abs(run('sim.lon') * Math.PI / 180 * 6371 - 0.4) < 1e-8);
+});
+
+test('unavailable flight data pauses drift without borrowing surface or neighbouring winds', () => {
+  for (const mutation of ['delete hourly.wind_speed_850hPa',
+    'hourly.wind_direction_850hPa[0] = null', 'hourly.wind_speed_850hPa[0] = -1',
+    'hourly.geopotential_height_850hPa[0] = null', 'openMeteoWeather.cache.clear()']) {
+    const run = app('open-meteo');
+    forecast(run, 24, 270);
+    run(mutation);
+    run(`selectPressureLevel(850); Date.now = () => ${when + 60000}; readState()`);
+    assert.equal(run('sim.lon'), 0);
+    assert.equal(run('sim.lat'), 0);
+    assert.equal(run('sim.flightAvailable'), false);
+    assert.equal(run('sim.alt'), null);
+  }
+});
+
+test('only documented discrete pressure levels can be selected', () => {
+  const run = app();
+  assert.throws(() => run('selectPressureLevel(875)'), /Unknown pressure level/);
+  assert.equal(run('pressureLevel'), null);
 });
 
 test('movement uses the selected Open-Meteo adapter wind', () => {

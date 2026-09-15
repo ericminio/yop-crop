@@ -18,18 +18,43 @@ The last usable forecast remains available during refresh. Failed requests retry
 after one minute. These checks run when animation frames run, so returning to a
 suspended tab also triggers any overdue refresh.
 
-Both adapters expose 10 m wind speed in km/h and wind direction in degrees
-(the bearing the wind comes from). The platform uses that speed for drift and
-arrival estimates, and the opposite bearing for heading. This uses surface wind
-as a drift approximation; it does not model winds at flight altitude or route
-feasibility. Simulated wind preserves the existing variation with mission time.
+Surface wind (10 m) remains the default drift approximation. In Open-Meteo mode,
+the Flight level selector also offers the 19 discrete pressure levels from
+1000 to 30 hPa. Drift and arrival estimates use the selected level's wind speed;
+heading is opposite the meteorological wind direction (the bearing wind comes
+from). Wind is never blended between levels. Simulated wind preserves the
+existing variation with mission time; pressure selection requires Open-Meteo.
+
+The altitude display uses the selected level's forecast geopotential height in
+metres above sea level (ASL), which varies with place and time. Changing levels
+finishes elapsed movement at the previous level, then switches wind without
+changing horizontal position. Missing or invalid selected-level wind or height
+pauses drift and displays unavailable data, rather than substituting surface wind.
+Cached data remains usable during refresh under the existing cache policy.
+
+Crop temperature, humidity and cloud cover also come from the selected level.
+VPD is derived from its temperature and relative humidity. Daily temperature
+extremes require all 24 hourly samples of that UTC day; these extremes drive
+thermal growth and crop needs. Switching levels recalculates crop tracks and
+candidate outlooks at that level. Tracks are scenarios for the currently selected
+level, not a persisted history of previously flown levels.
+
+Missing pressure-level crop weather stays unavailable, including beyond forecast
+coverage. Crop projections end at the first missing day without reporting a
+thermal stall. Open-Meteo does not provide pressure-level solar radiation or
+reference evaporation: DLI, irrigation estimates and overall suitability scores
+are shown as unavailable at altitude. Day length still uses solar geometry.
+There is no model of ascent/descent, terrain clearance or route feasibility.
+The pressure levels and variables are documented in the
+[Open-Meteo forecast API](https://open-meteo.com/en/docs#pressure-level-variables).
 
 Position advances in real time with the selected adapter's wind, starting from
 the initial position. Selecting a new position resets the movement clock there.
 The map and coordinates follow the drift; scrubbing the crop timeline does not
 move the platform. After a suspended tab resumes, elapsed time is integrated in
-steps using weather along the route (simulated fallback where forecasts are not
-cached). Reloading starts a new session; the flight path is not persisted.
+steps using weather along the route (simulated fallback in surface mode, paused
+drift for unavailable pressure-level data). Reloading starts a new session;
+the flight path and selected level are not persisted.
 
 Run the weather and movement checks with `node --test tests/*.test.cjs`.
 The `Tests` GitHub Actions check runs both suites on every pull request and on

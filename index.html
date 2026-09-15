@@ -67,6 +67,8 @@
   #top .big { font-size: 17px; line-height: 1.05; font-variant-numeric: tabular-nums;
               white-space: nowrap; }
   #top .sub { font-size: 9.5px; color: var(--dim); margin-top: 2px; white-space: nowrap; }
+  #pressure-level { pointer-events: auto; font: inherit; font-size: 9.5px;
+    color: var(--ink); background: #0a1622; border: 1px solid var(--edge); margin-top: 3px; }
   #ident .big { color: var(--cyan); letter-spacing: 0.06em; }
   #top .spacer { flex: 1; border-right: 0; padding: 0; }
   .chip { display: inline-block; padding: 1px 6px; border: 1px solid currentColor;
@@ -203,6 +205,7 @@
     <div class="cell">
       <div class="lab">Position</div><div class="big" id="latlon">—</div>
       <div class="sub"><span id="alt">—</span> &middot; hdg <span id="hdg">—</span> &middot; <span id="drift">—</span></div>
+      <label class="sub" for="pressure-level">Flight level </label><select id="pressure-level" aria-label="Flight pressure level"></select>
     </div>
     <div class="cell">
       <div class="lab">Air temperature</div>
@@ -350,7 +353,10 @@
 
   const LAUNCH = Date.UTC(2026, 8, 10, 6, 0);
   const FORECAST_DAYS = 16;
-  const sim = { lat: 0, lon: 0, alt: 2, hdg: 0, drift: 0,
+  const PRESSURE_LEVELS = [1000, 975, 950, 925, 900, 850, 800, 700, 600,
+                         500, 400, 300, 250, 200, 150, 100, 70, 50, 30];
+  let pressureLevel = null;
+  const sim = { lat: 0, lon: 0, alt: null, hdg: 0, drift: 0,
                 fuel: 0.62, cloud: 0.22, water: 9.6 };
   let scrub = null;
   let nowDay = 0;
@@ -459,7 +465,12 @@
     name: 'open-meteo',
     endpoint: 'https://api.open-meteo.com/v1/forecast',
     hourly: ['temperature_2m','relative_humidity_2m','vapour_pressure_deficit','cloud_cover',
-             'wind_speed_10m','wind_direction_10m'],
+             'wind_speed_10m','wind_direction_10m'].concat(PRESSURE_LEVELS.flatMap(function (level) {
+      return ['wind_speed_', 'wind_direction_', 'geopotential_height_',
+              'temperature_', 'relative_humidity_', 'cloud_cover_'].map(function (field) {
+        return field + level + 'hPa';
+      });
+    })),
     daily: ['temperature_2m_max','temperature_2m_min','shortwave_radiation_sum',
             'daylight_duration','et0_fao_evapotranspiration'],
     cache: new Map(),
@@ -524,6 +535,7 @@
       return when <= now ? 'measured' : 'forecast';
     },
     at: function (lat, lon, when) {
+      if (pressureLevel !== null) return pressureWeatherAt(lat, lon, when);
       const row = this.cache.get(this.key(lat, lon));
       if (!row || !this.covers(row, when)) return simulatedWeather.at(lat, lon, when);
       const sec = when / 1000;
@@ -574,6 +586,66 @@
 
   let positionTime = null;
 
+  function pressureWeatherAt(lat, lon, when) {
+    const row = openMeteoWeather.cache.get(openMeteoWeather.key(lat, lon));
+    const day = Math.floor(when / 86400000) * 86400;
+    const suffix = pressureLevel + 'hPa';
+    const h = row && openMeteoWeather.covers(row, when)
+      ? nearestIndex(row.hourly.time, when / 1000) : -1;
+    const value = function (field) {
+      const v = row?.hourly[field + suffix]?.[h];
+      return Number.isFinite(v) ? v : NaN;
+    };
+    const temp = value('temperature_');
+    const humidity = value('relative_humidity_');
+    const rh = humidity >= 0 && humidity <= 100 ? humidity : NaN;
+    const clouds = value('cloud_cover_');
+    const temperatures = [];
+    // Require all 24 UTC hours; partial days cannot supply daily extremes.
+    for (let hour = 0; hour < 24; hour++) {
+      const i = row?.hourly.time.indexOf(day + hour * 3600) ?? -1;
+      const t = row?.hourly['temperature_' + suffix]?.[i];
+      if (Number.isFinite(t)) temperatures.push(t);
+    }
+    return {
+      // Preserve the adapter's existing field contract for crop consumers.
+      temperature_2m: temp,
+      temperature_2m_min: temperatures.length === 24 ? Math.min(...temperatures) : NaN,
+      temperature_2m_max: temperatures.length === 24 ? Math.max(...temperatures) : NaN,
+      relative_humidity_2m: rh,
+      vapour_pressure_deficit: svp(temp) * (1 - rh / 100),
+      cloud_cover: clouds >= 0 && clouds <= 100 ? clouds : NaN,
+      daylight_duration: solar(lat, doyOf(when), 12).dayLen * 3600,
+      shortwave_radiation_sum: NaN,
+      et0_fao_evapotranspiration: NaN
+    };
+  }
+
+  function flightAt(lat, lon, when) {
+    if (pressureLevel === null) {
+      const wx = weather.at(lat, lon, when);
+      return { speed: wx.wind_speed_10m, direction: wx.wind_direction_10m, altitude: null };
+    }
+    const row = weather === openMeteoWeather && openMeteoWeather.cache.get(openMeteoWeather.key(lat, lon));
+    if (!row || !openMeteoWeather.covers(row, when)) return null;
+    const h = nearestIndex(row.hourly.time, when / 1000);
+    const suffix = pressureLevel + 'hPa';
+    const speed = row.hourly['wind_speed_' + suffix]?.[h];
+    const direction = row.hourly['wind_direction_' + suffix]?.[h];
+    const altitude = row.hourly['geopotential_height_' + suffix]?.[h];
+    if (!Number.isFinite(speed) || speed < 0 || !Number.isFinite(direction) ||
+        direction < 0 || direction > 360 || !Number.isFinite(altitude)) return null;
+    return { speed: speed, direction: direction, altitude: altitude };
+  }
+
+  function selectPressureLevel(level) {
+    if (level !== null && !PRESSURE_LEVELS.includes(level)) throw new RangeError('Unknown pressure level');
+    // Finish elapsed movement at the old level before switching winds.
+    advancePosition(Date.now());
+    pressureLevel = level;
+    readState();
+  }
+
   function advancePosition(now) {
     if (positionTime === null || now <= positionTime) {
       positionTime = now;
@@ -584,10 +656,11 @@
     const steps = Math.min(240, Math.ceil((now - positionTime) / 60000));
     const dt = (now - positionTime) / steps;
     for (let i = 0; i < steps; i++) {
-      const wx = weather.at(sim.lat, sim.lon, positionTime + i * dt);
-      const distance = wx.wind_speed_10m * dt / 3600000;
+      const flight = flightAt(sim.lat, sim.lon, positionTime + i * dt);
+      if (!flight) continue;
+      const distance = flight.speed * dt / 3600000;
       if (distance === 0) continue;
-      const arc = distance / 6371, bearing = (wx.wind_direction_10m + 180) * D;
+      const arc = distance / 6371, bearing = (flight.direction + 180) * D;
       const lat = sim.lat * D, lon = sim.lon * D;
       const nextLat = Math.asin(clamp(Math.sin(lat) * Math.cos(arc) +
         Math.cos(lat) * Math.sin(arc) * Math.cos(bearing), -1, 1));
@@ -609,9 +682,12 @@
     const solarHours = localSolar(utcHours, sim.lon);
     const s = solar(sim.lat, doy, solarHours);
     const wx = weather.at(sim.lat, sim.lon, now);
-    sim.drift = wx.wind_speed_10m;
+    const flight = flightAt(sim.lat, sim.lon, now);
+    sim.flightAvailable = !!flight;
+    sim.alt = flight ? flight.altitude : null;
+    sim.drift = flight ? flight.speed : 0;
     // Meteorological wind comes FROM this bearing; the platform drifts TO its opposite.
-    sim.hdg = (wx.wind_direction_10m + 180) % 360;
+    sim.hdg = flight ? (flight.direction + 180) % 360 : 0;
 
     return { now: now, d: d, lst: solarHours, doy: doy, missionDay: missionDay,
              sun: s, wx: wx,
@@ -632,12 +708,19 @@
       rate[d] = Math.max(0, (wx.temperature_2m_max + wx.temperature_2m_min) / 2 - c.tBase);
     }
 
+    const watch = Math.max(first, Math.floor(sowDay === null ? missionDay : sowDay));
+    let unknownFrom = null;
+    for (let d = watch; d < endDay; d++) {
+      if (!Number.isFinite(rate[d])) { unknownFrom = d; break; }
+    }
+    const knownEnd = unknownFrom === null ? endDay : unknownFrom;
+
     const segs = [];
     if (sowDay !== null) {
       let day = Math.max(first, Math.floor(sowDay)), guard = 0;
-      while (day < endDay && guard < 20000) {
+      while (day < knownEnd && guard < 20000) {
         let acc = 0, idx = 0, from = day;
-        while (idx < c.need.length && day < endDay && guard++ < 20000) {
+        while (idx < c.need.length && day < knownEnd && guard++ < 20000) {
           acc += rate[day];
           day += 1;
           if (acc >= c.need[idx].gdd) {
@@ -646,18 +729,17 @@
             idx++; from = day;
           }
         }
-        if (idx < c.need.length) { segs.push({ from: from, to: endDay, idx: idx, open: true }); break; }
+        if (idx < c.need.length) { segs.push({ from: from, to: knownEnd, idx: idx, open: true }); break; }
         segs.push({ from: day, to: day + TURNAROUND, idx: -1 });
         day += TURNAROUND;
       }
     }
 
-    const watch = Math.max(first, Math.floor(sowDay === null ? missionDay : sowDay));
     let last = watch - 1;
     for (let d = watch; d < endDay; d++) if (rate[d] >= STALL_RATE) last = d;
-    const stall = last + 1 < endDay ? Math.max(watch, last + 1) : null;
+    const stall = unknownFrom === null && last + 1 < endDay ? Math.max(watch, last + 1) : null;
 
-    return { segs: segs, stall: stall, rate: rate, sown: sowDay, from: watch };
+    return { segs: segs, stall: stall, unknownFrom: unknownFrom, rate: rate, sown: sowDay, from: watch };
   }
 
   const devel = { key: null, tracks: null };
@@ -669,7 +751,7 @@
   function candidateOutlooks(lat, lon, now, missionDay, endDay) {
     const crop = CROPS[SCORE_CROP];
     // Ignore sub-0.01 km/h changes so smooth simulated wind does not rebuild tracks every frame.
-    const key = [weather.name, weather.revision || 0,
+    const key = [weather.name, weather.revision || 0, pressureLevel,
                  lat.toFixed(2), lon.toFixed(2), Math.floor(missionDay), sim.drift.toFixed(2)].join('|');
     if (outlook.key === key) return outlook.rows;
     outlook.key = key;
@@ -684,6 +766,7 @@
       return { eta: eta, lat: cLat, lon: cLon,
                wx: weather.at(cLat, cLon, now + eta * 3600000),
                usable: tr.stall === null ? Infinity : Math.max(0, tr.stall - arrive),
+               unknownFrom: tr.unknownFrom,
                harvest: harvest };
     });
     return outlook.rows;
@@ -691,7 +774,7 @@
 
   function tracksFor(lat, lon, missionDay, fromDay, endDay) {
     const primed = weather.revision || 0;
-    const key = [weather.name, primed, lat.toFixed(2), lon.toFixed(2),
+    const key = [weather.name, primed, pressureLevel, lat.toFixed(2), lon.toFixed(2),
                  Math.floor(missionDay), Math.floor(fromDay), Math.ceil(endDay),
                  sown.join(',')].join('|');
     if (devel.key !== key) {
@@ -704,6 +787,9 @@
   }
 
   function phaseAt(track, day) {
+    if (track.sown !== null && Number.isFinite(track.unknownFrom) && day >= track.unknownFrom) {
+      return { idx: -3, phase: 'weather unavailable', toHarvest: null };
+    }
     const segs = track.segs;
     for (let i = 0; i < segs.length; i++) {
       const sg = segs[i];
@@ -1014,6 +1100,14 @@
         }
       }
 
+      if (Number.isFinite(track.unknownFrom) && track.unknownFrom < day0 + span) {
+        const ux = Math.max(padL, X(track.unknownFrom));
+        tctx.fillStyle = 'rgba(122,163,184,0.10)';
+        tctx.fillRect(ux, by, Math.max(0, padL + plotW - ux), bh);
+        tctx.fillStyle = 'rgba(122,163,184,0.8)';
+        tctx.font = '8.5px ui-monospace, Menlo, monospace';
+        tctx.fillText('weather unavailable', ux + 4, by + bh/2);
+      }
       if (track.stall !== null && track.stall < day0 + span) {
         const sx = Math.max(padL, X(track.stall));
         const sb = Math.min(padL + plotW, X(day0 + span));
@@ -1548,6 +1642,7 @@
   }
 
   function bandStatus(v, lo, hi, soft, labels) {
+    if (!Number.isFinite(v)) return ['unavailable',''];
     if (v >= lo && v <= hi) return ['ok','ok'];
     const d = v < lo ? lo - v : v - hi;
     return [v < lo ? labels[0] : labels[1], d > soft ? 'bad' : 'warn'];
@@ -1571,6 +1666,7 @@
 
   function fitScore(wx, crop, ph, refDays) {
     const a = axesOf(wx, crop);
+    if (!Object.values(a).every(Number.isFinite)) return NaN;
     const over = Math.min(1, Math.max(0, (projectedDays(ph, crop, wx) - refDays) / refDays));
     let miss = 0;
     miss += WEIGHT.gdd   * over;
@@ -1633,6 +1729,10 @@
     el.sunmk.style.left = Math.round(Math.max(0, Math.min(w - uw, x))) + 'px';
   }
 
+  function formatWeather(value, digits) {
+    return Number.isFinite(value) ? value.toFixed(digits) : '—';
+  }
+
   function updateHUD(st, markDay, tracks, endDay) {
     const d = st.d;
     el.clock.textContent = pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes())+':'+
@@ -1641,9 +1741,10 @@
     el.datestr.textContent = d.getUTCDate()+' '+MONTHS[d.getUTCMonth()]+' '+d.getUTCFullYear();
     el.latlon.textContent = Math.abs(sim.lat).toFixed(2)+'°'+(sim.lat>=0?'N':'S')+'  '+
                             Math.abs(sim.lon).toFixed(2)+'°'+(sim.lon>=0?'E':'W');
-    el.alt.textContent = Math.round(sim.alt)+' m AGL';
-    el.hdg.textContent = pad2(Math.round(sim.hdg))+'°';
-    el.drift.textContent = sim.drift.toFixed(0)+' km/h';
+    el.alt.textContent = pressureLevel === null ? 'surface wind' :
+      sim.alt === null ? 'altitude unavailable' : Math.round(sim.alt)+' m ASL';
+    el.hdg.textContent = sim.flightAvailable ? pad2(Math.round(sim.hdg))+'°' : '—';
+    el.drift.textContent = sim.flightAvailable ? sim.drift.toFixed(0)+' km/h' : 'wind unavailable · drift paused';
 
     const scored = CROPS[SCORE_CROP];
     const scyc = phaseAt(tracks[SCORE_CROP], st.missionDay) || { idx: -2 };
@@ -1655,28 +1756,29 @@
     const ceil = gaugePh ? gaugePh.heat : sph.heat;
     const sax = axesOf(st.wx, scored);
 
-    el.temp.textContent = st.temp.toFixed(1);
+    el.temp.textContent = formatWeather(st.temp, 1);
     const pc = t => Math.max(0, Math.min(100, ((t-8)/24)*100));
     el.gband.style.left = pc(night[0])+'%';
     el.gband.style.width = (pc(night[1])-pc(night[0]))+'%';
     el.gceil.style.left = pc(ceil)+'%';
     el.gneedle.style.left = pc(st.temp)+'%';
-    el.trange.textContent = sax.nightMin.toFixed(1)+' / '+sax.dayMax.toFixed(1)+' °C';
-    el.gdd.textContent = sax.gddRate.toFixed(1);
+    el.gneedle.hidden = !Number.isFinite(st.temp);
+    el.trange.textContent = formatWeather(sax.nightMin, 1)+' / '+formatWeather(sax.dayMax, 1)+' °C';
+    el.gdd.textContent = formatWeather(sax.gddRate, 1);
     const inBand = sax.nightMin >= night[0] && sax.nightMin <= night[1] &&
                    sax.dayMax <= ceil;
     el.temp.style.color = inBand ? 'var(--green)' : 'var(--amber)';
     el.trange.style.color = inBand ? 'var(--dim)' : 'var(--amber)';
 
-    el.rh.textContent = st.rh.toFixed(0);
-    el.cloud.textContent = st.wx.cloud_cover.toFixed(0);
-    el.vpd.textContent = st.vpd.toFixed(2);
+    el.rh.textContent = formatWeather(st.rh, 0);
+    el.cloud.textContent = formatWeather(st.wx.cloud_cover, 0);
+    el.vpd.textContent = formatWeather(st.vpd, 2);
     el.daylen.textContent = hours(st.sun.dayLen);
     el.rise.textContent = hhmm(st.sun.rise);
     el.set.textContent = hhmm(st.sun.set);
     el.lstnow.textContent = hhmm(st.lst);
     el.elev.textContent = st.sun.elev.toFixed(0);
-    el.dli.textContent = st.dli.toFixed(0);
+    el.dli.textContent = formatWeather(st.dli, 0);
     el.mkrise.style.left = (st.sun.rise/24*100)+'%';
     el.mkset.style.left = (st.sun.set/24*100)+'%';
     el.mknow.style.left = (st.lst/24*100)+'%';
@@ -1689,25 +1791,25 @@
     const marg = (gross-mass)/mass*100;
     el.margin.textContent = (marg>=0?'+':'')+marg.toFixed(1)+' %';
     el.margin.className = 'v '+(marg>5?'ok':marg>1?'hi':'no');
-    el.envt.textContent = (108+Math.sin(st.lst/3.3)*5+(19-st.temp)*0.8).toFixed(0)+' °C';
+    el.envt.textContent = formatWeather(108+Math.sin(st.lst/3.3)*5+(19-st.temp)*0.8, 0)+' °C';
     el.fuel.textContent = (sim.fuel*100).toFixed(0)+' %';
     el.fuel.className = 'v '+(sim.fuel>0.3?'ok':sim.fuel>0.15?'hi':'no');
-    el.burn.textContent = (41+Math.max(0,19-st.temp)*3.2).toFixed(0)+' kg/h';
+    el.burn.textContent = formatWeather(41+Math.max(0,19-st.temp)*3.2, 0)+' kg/h';
     el.teth.textContent = '±1.2 %'; el.tilt.textContent = '0.00°';
     el.lifttag.textContent = '5 × 49,500 m³';
 
-    let draw = 0;
+    let draw = Number.isFinite(st.et0) ? 0 : NaN;
     for (let i = 0; i < CROPS.length; i++) {
       const cy = phaseAt(tracks[i], st.missionDay);
       if (cy && cy.idx >= 0) draw += CROPS[i].area * CROPS[i].need[cy.idx].kc * st.et0;
     }
     draw /= 1000;
     el.wres.textContent = sim.water.toFixed(1)+' t';
-    el.wdraw.textContent = draw.toFixed(2)+' t/d';
-    el.et.textContent = st.et0.toFixed(1)+' mm/d';
-    el.wcap.textContent = (st.wx.cloud_cover/100*1.1).toFixed(2)+' t';
+    el.wdraw.textContent = formatWeather(draw, 2)+' t/d';
+    el.et.textContent = formatWeather(st.et0, 1)+' mm/d';
+    el.wcap.textContent = formatWeather(st.wx.cloud_cover/100*1.1, 2)+' t';
     const dry = sim.water/Math.max(0.01,draw);
-    el.wdays.textContent = dry.toFixed(1)+' d';
+    el.wdays.textContent = formatWeather(dry, 1)+' d';
     el.wdays.className = 'v '+(dry>5?'ok':dry>2?'hi':'no');
 
     const off = markDay - st.missionDay;
@@ -1721,7 +1823,8 @@
         ? '—' : cy.toHarvest;
       if (cy.idx < 0) {
         E.root.classList.add('idle');
-        E.note.textContent = cy.idx === -1 ? 'bed empty, being turned round'
+        E.note.textContent = cy.idx === -3 ? 'selected-level forecast unavailable'
+                            : cy.idx === -1 ? 'bed empty, being turned round'
                                            : 'not sown \u2014 click the timeline';
         for (let j = 0; j < NEED_ROWS.length; j++) {
           E.rows[j].style.display = j === PHOTO_ROW ? 'none' : '';
@@ -1734,20 +1837,21 @@
       E.note.textContent = n.note;
 
       const ref = SPLIT[cy.idx] * c.days, proj = cy.phaseDays;
-      const gS = cy.open ? ['stalled','bad']
+      const gS = cy.open && tracks[i].unknownFrom !== null ? ['forecast ends','']
+               : cy.open ? ['stalled','bad']
                : proj <= ref*1.1 ? ['ok','ok']
                : proj <= ref*1.5 ? ['slow','warn'] : ['stalled','bad'];
       setNeed(E, 0, ref.toFixed(0)+' d planned',
               (cy.open ? '>' : '') + proj.toFixed(0)+' d', gS);
 
-      setNeed(E, 1, n.night[0]+'–'+n.night[1]+' °C', a.nightMin.toFixed(1),
+      setNeed(E, 1, n.night[0]+'–'+n.night[1]+' °C', formatWeather(a.nightMin, 1),
               bandStatus(a.nightMin, n.night[0], n.night[1], 3, ['cold','hot']));
 
-      const lS = a.dli >= n.dli ? ['ok','ok']
+      const lS = !Number.isFinite(a.dli) ? ['unavailable',''] : a.dli >= n.dli ? ['ok','ok']
                : a.dli >= n.dli*0.7 ? ['thin','warn'] : ['short','bad'];
-      setNeed(E, 2, n.dli+' mol/d', a.dli.toFixed(0), lS);
+      setNeed(E, 2, n.dli+' mol/d', formatWeather(a.dli, 0), lS);
 
-      setNeed(E, 3, n.vpd[0].toFixed(2)+'–'+n.vpd[1].toFixed(2), a.vpd.toFixed(2),
+      setNeed(E, 3, n.vpd[0].toFixed(2)+'–'+n.vpd[1].toFixed(2), formatWeather(a.vpd, 2),
               bandStatus(a.vpd, n.vpd[0], n.vpd[1], 0.4, ['damp','dry']));
 
       E.rows[PHOTO_ROW].style.display = n.photo ? '' : 'none';
@@ -1763,21 +1867,21 @@
     el.candtag.textContent = scored.name + ' \u00b7 ' +
       (scyc.idx >= 0 ? sph.note : 'if sown');
 
-    let best=-1, bi=0;
+    let best=-1, bi=-1;
     const outs = candidateOutlooks(sim.lat, sim.lon, st.now, st.missionDay, endDay);
     for (let i = 0; i < CANDIDATES.length; i++) {
       const cd = CANDIDATES[i], o = outs[i];
       const short = Math.min(1, Math.max(0, (scored.days - o.usable) / scored.days));
       const sc = Math.max(0, fitScore(o.wx, scored, sph, sRef) - 45 * short);
       if (sc > best) { best = sc; bi = i; }
-      candEls[i].sc.textContent = sc.toFixed(0);
+      candEls[i].sc.textContent = formatWeather(sc, 0);
       candEls[i].sc.style.color = sc>=88?'var(--green)':sc>=65?'var(--amber)':'var(--red)';
       const ax = axesOf(o.wx, scored);
       candEls[i].dt.textContent = cd.brg+'  ·  '+
         (cd.dist ? cd.dist+' km · '+o.eta.toFixed(0)+' h  ·  ' : '')+
-        ax.nightMin.toFixed(0)+'/'+ax.dayMax.toFixed(0)+' °C  ·  '+
-        ax.dli.toFixed(0)+' mol  ·  '+
-        (o.usable === Infinity
+        formatWeather(ax.nightMin, 0)+'/'+formatWeather(ax.dayMax, 0)+' °C  ·  '+
+        formatWeather(ax.dli, 0)+' mol  ·  '+
+        (o.unknownFrom !== null && o.unknownFrom !== undefined ? 'forecast ends D' + Math.round(o.unknownFrom) : o.usable === Infinity
           ? (o.harvest === null ? 'no stall' : 'harvest D' + Math.round(o.harvest))
           : Math.round(o.usable) + ' d usable');
       candEls[i].dt.style.color = o.usable < scored.days ? 'var(--red)' : '';
@@ -1788,8 +1892,9 @@
 
     const stallDay = tracks[SCORE_CROP].stall;
     const doomed = stallDay !== null;
-    const ok = inBand && marg > 3 && sim.fuel > 0.2 && !doomed;
-    el.status.textContent = !doomed ? (ok ? 'nominal' : 'attention')
+    const ok = inBand && marg > 3 && sim.fuel > 0.2 && !doomed && Number.isFinite(st.dli);
+    el.status.textContent = !Number.isFinite(st.temp) ? 'weather unavailable'
+      : !doomed ? (ok ? 'nominal' : 'attention')
       : stallDay <= st.missionDay ? 'stalled'
       : 'stall in ' + Math.round(stallDay - st.missionDay) + ' d';
     el.status.style.borderColor = doomed ? 'var(--red)' : '';
@@ -1800,7 +1905,7 @@
   function frame(now) {
     const st = readState();
     const markDay = scrub === null ? st.missionDay : scrub;
-    sim.cloud = st.wx.cloud_cover / 100;
+    if (Number.isFinite(st.wx.cloud_cover)) sim.cloud = st.wx.cloud_cover / 100;
     weather.prime(scoringPoints(), st.missionDay + 2);
 
     const w = window.innerWidth, h = window.innerHeight, e = st.sun.elev;
@@ -1838,7 +1943,8 @@
 
   function weatherNote() {
     return (weather === simulatedWeather ? 'simulated conditions' : 'open-meteo forecast') +
-           ' \u00b7 mission clock is real \u00b7 drifting with wind';
+           (pressureLevel === null ? ' \u00b7 mission clock is real \u00b7 drifting with wind'
+             : ' \u00b7 ' + pressureLevel + ' hPa wind & crop weather \u00b7 light and evaporation unavailable');
   }
 
   function askPosition() {
@@ -1856,6 +1962,18 @@
       },
       { timeout: 10000, maximumAge: 600000 });
   }
+
+  const levelControl = document.getElementById('pressure-level');
+  levelControl.add(new Option('Surface wind (10 m)', ''));
+  PRESSURE_LEVELS.forEach(function (level) {
+    levelControl.add(new Option(level + ' hPa', String(level)));
+  });
+  levelControl.disabled = weather !== openMeteoWeather;
+  levelControl.title = levelControl.disabled ? 'Flight levels require ?weather=open-meteo' : 'Wind and crop weather at this pressure level; altitude above sea level';
+  levelControl.addEventListener('change', function () {
+    selectPressureLevel(levelControl.value === '' ? null : Number(levelControl.value));
+    document.getElementById('sim').textContent = weatherNote();
+  });
 
   buildRows();
   syncMapCtl();
