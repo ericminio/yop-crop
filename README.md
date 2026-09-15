@@ -59,9 +59,38 @@ thickness, scattering or reflection. Surface total cloud and pressure-level
 cloud estimates may disagree. Complete hourly coverage and valid daytime cloud
 and radiation data are required; missing data remains unavailable. Estimated
 radiation supplies crop DLI and suitability scores; header DLI is prefixed `~`.
-Day length still uses solar geometry. Reference evaporation and irrigation
-estimates remain unavailable at altitude; this change does not add an evaporation
-model. Relative wind remains assumed zero for a platform drifting with the air.
+Day length still uses solar geometry.
+
+### Estimated water demand at altitude
+
+Reference evaporation uses a daily FAO-56-style calculation adapted to zero
+relative wind: `ET = max(0, 0.408 × Δ × Rn / (Δ + γ))`, in mm/day.
+Temperature sets the saturation-pressure slope Δ; γ uses the selected pressure
+in kPa. Net radiation Rn is absorbed shortwave radiation (albedo 0.23) minus
+estimated outgoing longwave radiation. Longwave uses daily temperature extremes,
+mean actual vapour pressure from hourly temperature/RH pairs, and the ratio of
+estimated radiation to a clear-sky estimate at the mean forecast altitude.
+That ratio is clamped to 0.3–1; the clear-sky transmission is capped at 1.
+
+Relative wind is exactly zero for the drifting platform: the aerodynamic VPD
+term vanishes, with no minimum wind or substitution of drift speed. Humidity
+still affects the longwave estimate. Daily heat storage is assumed zero and
+negative net evaporation is clipped to zero (no condensation estimate).
+Complete daily temperature, humidity, height and radiation inputs are required.
+This adaptation is uncalibrated for a flying deck, especially at extreme
+altitudes, and does not model leaf temperature, natural convection, soil-water
+stress or irrigation efficiency. Equations are based on
+[FAO-56 reference evaporation](https://www.fao.org/4/X0490E/x0490e06.htm) and
+[net radiation](https://www.fao.org/4/X0490E/x0490e07.htm).
+
+Deck water demand sums `ET × crop-stage coefficient × planted area`.
+One mm over one m² is one litre; the panel converts litres to tonnes of water.
+Reference ET, deck draw and days to dry carry `~` when estimated at altitude.
+Empty beds and turnaround have no crop demand; an unknown planted crop phase
+leaves demand unavailable. Days to dry uses current water divided by current
+daily draw, with no depletion at zero draw. It is a constant-demand projection,
+not a water-budget simulation; it does not deduct rain/cloud capture or update
+the stored water over time.
 There is no model of ascent/descent, terrain clearance or route feasibility.
 The pressure levels and variables are documented in the
 [Open-Meteo forecast API](https://open-meteo.com/en/docs#pressure-level-variables).

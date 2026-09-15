@@ -635,13 +635,23 @@
     const humidity = value('relative_humidity_');
     const rh = humidity >= 0 && humidity <= 100 ? humidity : NaN;
     const clouds = value('cloud_cover_');
-    const temperatures = [];
+    const temperatures = [], vapourPressures = [], heights = [];
     // Require all 24 UTC hours; partial days cannot supply daily extremes.
     for (let hour = 0; hour < 24; hour++) {
       const i = row?.hourly.time.indexOf(day + hour * 3600) ?? -1;
       const t = row?.hourly['temperature_' + suffix]?.[i];
       if (Number.isFinite(t)) temperatures.push(t);
+      const humidity = row?.hourly['relative_humidity_' + suffix]?.[i];
+      if (Number.isFinite(t) && Number.isFinite(humidity) && humidity >= 0 && humidity <= 100) {
+        vapourPressures.push(svp(t) * humidity / 100);
+      }
+      const height = row?.hourly['geopotential_height_' + suffix]?.[i];
+      if (Number.isFinite(height)) heights.push(height);
     }
+    const radiation = estimatedRadiationDay(row, lat, lon, day);
+    const et0 = temperatures.length === 24 && vapourPressures.length === 24 && heights.length === 24
+      ? zeroWindEvaporation(radiation, lat, day, temperatures, vapourPressures, heights, pressureLevel)
+      : NaN;
     return {
       // Preserve the adapter's existing field contract for crop consumers.
       temperature_2m: temp,
@@ -651,10 +661,29 @@
       vapour_pressure_deficit: svp(temp) * (1 - rh / 100),
       cloud_cover: clouds >= 0 && clouds <= 100 ? clouds : NaN,
       daylight_duration: solar(lat, doyOf(when), 12).dayLen * 3600,
-      shortwave_radiation_sum: estimatedRadiationDay(row, lat, lon, day),
+      shortwave_radiation_sum: radiation,
       radiation_estimated: true,
-      et0_fao_evapotranspiration: NaN
+      evaporation_estimated: true,
+      et0_fao_evapotranspiration: et0
     };
+  }
+
+  function zeroWindEvaporation(rs, lat, day, temperatures, vapourPressures, heights, level) {
+    if (!Number.isFinite(rs) || rs < 0) return NaN;
+    const mean = values => values.reduce((sum, value) => sum + value, 0) / values.length;
+    const t = mean(temperatures), low = Math.min(...temperatures), high = Math.max(...temperatures);
+    const ea = mean(vapourPressures);
+    const rso = clamp(0.75 + 0.00002 * mean(heights), 0, 1) * raDaily(lat, doyOf(day * 1000));
+    if (rs === 0 || rso <= 0) return 0;
+    // FAO-56 daily net radiation (albedo .23), adapted to the selected level.
+    const longwave = 4.903e-9 * (Math.pow(low + 273.16, 4) + Math.pow(high + 273.16, 4)) / 2 *
+      Math.max(0, 0.34 - 0.14 * Math.sqrt(ea)) * (1.35 * clamp(rs / rso, 0.3, 1) - 0.35);
+    const net = 0.77 * rs - longwave;
+    const slope = 4098 * svp(t) / Math.pow(t + 237.3, 2);
+    const gamma = 0.000665 * (level / 10); // Selected pressure: hPa to kPa.
+    // u2 = 0 relative to the drifting platform; daily heat storage G = 0.
+    // The aerodynamic/VPD term vanishes. Do not substitute drift wind or a wind floor.
+    return Math.max(0, 0.408 * slope * net / (slope + gamma));
   }
 
   function flightAt(lat, lon, when) {
@@ -843,6 +872,17 @@
                toHarvest: harvest === null ? null : Math.ceil(harvest - day) };
     }
     return null;
+  }
+
+  function waterDemand(tracks, day, et0) {
+    if (!Number.isFinite(et0) || et0 < 0) return NaN;
+    let litres = 0;
+    for (let i = 0; i < CROPS.length; i++) {
+      const cy = phaseAt(tracks[i], day);
+      if (cy?.idx === -3 || (!cy && tracks[i].sown !== null && day >= tracks[i].sown)) return NaN;
+      if (cy && cy.idx >= 0) litres += CROPS[i].area * CROPS[i].need[cy.idx].kc * et0;
+    }
+    return litres / 1000; // 1 mm over 1 m² = 1 litre; fresh water is about 1000 litres/t.
   }
 
   const canvas = document.getElementById('scene');
@@ -1836,18 +1876,17 @@
     el.teth.textContent = '±1.2 %'; el.tilt.textContent = '0.00°';
     el.lifttag.textContent = '5 × 49,500 m³';
 
-    let draw = Number.isFinite(st.et0) ? 0 : NaN;
-    for (let i = 0; i < CROPS.length; i++) {
-      const cy = phaseAt(tracks[i], st.missionDay);
-      if (cy && cy.idx >= 0) draw += CROPS[i].area * CROPS[i].need[cy.idx].kc * st.et0;
-    }
-    draw /= 1000;
+    const draw = waterDemand(tracks, st.missionDay, st.et0);
+    const estimatedWater = st.wx.evaporation_estimated;
     el.wres.textContent = sim.water.toFixed(1)+' t';
-    el.wdraw.textContent = formatWeather(draw, 2)+' t/d';
-    el.et.textContent = formatWeather(st.et0, 1)+' mm/d';
+    el.wdraw.textContent = (estimatedWater && Number.isFinite(draw) ? '~' : '') + formatWeather(draw, 2)+' t/d';
+    el.et.textContent = (estimatedWater && Number.isFinite(st.et0) ? '~' : '') + formatWeather(st.et0, 1)+' mm/d';
+    el.et.title = estimatedWater ? 'Estimated reference evaporation at altitude; relative wind = 0' : '';
+    el.wdraw.title = estimatedWater ? 'Estimated reference evaporation × crop-stage coefficient × planted area' : '';
     el.wcap.textContent = formatWeather(st.wx.cloud_cover/100*1.1, 2)+' t';
-    const dry = sim.water/Math.max(0.01,draw);
-    el.wdays.textContent = formatWeather(dry, 1)+' d';
+    const dry = draw === 0 ? Infinity : sim.water / draw;
+    el.wdays.textContent = dry === Infinity ? '∞ (no draw)' :
+      (estimatedWater && Number.isFinite(dry) ? '~' : '') + formatWeather(dry, 1)+' d';
     el.wdays.className = 'v '+(dry>5?'ok':dry>2?'hi':'no');
 
     const off = markDay - st.missionDay;
@@ -1982,7 +2021,7 @@
   function weatherNote() {
     return (weather === simulatedWeather ? 'simulated conditions' : 'open-meteo forecast') +
            (pressureLevel === null ? ' \u00b7 mission clock is real \u00b7 drifting with wind'
-             : ' \u00b7 ' + pressureLevel + ' hPa wind & crop weather \u00b7 light estimated \u00b7 evaporation unavailable');
+             : ' \u00b7 ' + pressureLevel + ' hPa wind & crop weather \u00b7 light & water demand estimated');
   }
 
   function askPosition() {
