@@ -26,7 +26,7 @@ move the platform. After a suspended tab resumes, elapsed time is integrated in
 steps using weather along the route (simulated fallback where forecasts are not
 cached). Reloading starts a new session; the flight path is not persisted.
 
-Run the adapter checks with `node --test tests/weather.test.cjs`.
+Run the weather and movement checks with `node --test tests/*.test.cjs`.
 
 ## Design premise
 
