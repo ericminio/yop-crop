@@ -32,6 +32,8 @@ steps using weather along the route (simulated fallback where forecasts are not
 cached). Reloading starts a new session; the flight path is not persisted.
 
 Run the weather and movement checks with `node --test tests/*.test.cjs`.
+The `Tests` GitHub Actions check runs both suites on every pull request and on
+pushes to `dev`, using Node.js 22.
 
 ## Design premise
 
