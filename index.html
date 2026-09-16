@@ -67,8 +67,19 @@
   #top .big { font-size: 17px; line-height: 1.05; font-variant-numeric: tabular-nums;
               white-space: nowrap; }
   #top .sub { font-size: 9.5px; color: var(--dim); margin-top: 2px; white-space: nowrap; }
-  #pressure-level { pointer-events: auto; font: inherit; font-size: 9.5px;
-    color: var(--ink); background: #0a1622; border: 1px solid var(--edge); margin-top: 3px; }
+  .flight-control { position: absolute; top: 9px; right: 7px; bottom: 10px; width: 48px;
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+    border-left: 1px solid var(--edge); padding-left: 6px; }
+  .flight-control label, .flight-control span { font-size: 8px; color: var(--dim);
+    letter-spacing: 0.06em; white-space: nowrap; }
+  .flight-control label { color: var(--cyan); text-transform: uppercase; }
+  #pressure-level { writing-mode: vertical-lr; direction: rtl; flex: 1; min-height: 0;
+    width: 30px; margin: 0; cursor: ns-resize; accent-color: var(--cyan); }
+  #pressure-level:focus-visible { outline: 1px solid var(--cyan); outline-offset: 3px; }
+  #pressure-level:disabled { opacity: 0.35; cursor: default; }
+  #position > .ttl, #position > .body { margin-right: 51px; }
+  #position.collapsed > .ttl { margin-right: 0; }
+  #position.collapsed .flight-control { display: none; }
   #ident .big { color: var(--cyan); letter-spacing: 0.06em; }
   #top .spacer { flex: 1; border-right: 0; padding: 0; }
   .chip { display: inline-block; padding: 1px 6px; border: 1px solid currentColor;
@@ -205,7 +216,7 @@
     <div class="cell">
       <div class="lab">Position</div><div class="big" id="latlon">—</div>
       <div class="sub"><span id="alt">—</span> &middot; hdg <span id="hdg">—</span> &middot; <span id="drift">—</span></div>
-      <label class="sub" for="pressure-level">Flight level </label><select id="pressure-level" aria-label="Flight pressure level"></select>
+      <div class="sub">Flight level <span id="flight-level-value">surface</span></div>
     </div>
     <div class="cell">
       <div class="lab">Air temperature</div>
@@ -260,6 +271,12 @@
 
   <div class="col" id="colM">
     <div class="panel" id="position">
+      <div class="flight-control">
+        <label for="pressure-level">Level</label>
+        <span aria-hidden="true">30 hPa</span>
+        <input id="pressure-level" type="range" min="0" value="0" step="1" aria-orientation="vertical" aria-label="Flight pressure level">
+        <span aria-hidden="true">Surface</span>
+      </div>
       <div class="ttl"><span class="lhs"><span class="chev">&#9662;</span>Position</span>
         <b id="maptag">&mdash;</b></div>
       <div class="body">
@@ -1854,7 +1871,7 @@
     el.datestr.textContent = d.getUTCDate()+' '+MONTHS[d.getUTCMonth()]+' '+d.getUTCFullYear();
     el.latlon.textContent = Math.abs(sim.lat).toFixed(2)+'°'+(sim.lat>=0?'N':'S')+'  '+
                             Math.abs(sim.lon).toFixed(2)+'°'+(sim.lon>=0?'E':'W');
-    el.alt.textContent = pressureLevel === null ? 'surface wind' :
+    el.alt.textContent = pressureLevel === null ? 'surface' :
       sim.alt === null ? 'altitude unavailable' : Math.round(sim.alt)+' m ASL';
     el.hdg.textContent = sim.flightAvailable ? pad2(Math.round(sim.hdg))+'°' : '—';
     el.drift.textContent = sim.flightAvailable ? sim.drift.toFixed(0)+' km/h' : 'wind unavailable · drift paused';
@@ -2069,14 +2086,19 @@
   }
 
   const levelControl = document.getElementById('pressure-level');
-  levelControl.add(new Option('Surface wind (10 m)', ''));
-  PRESSURE_LEVELS.forEach(function (level) {
-    levelControl.add(new Option(level + ' hPa', String(level)));
-  });
+  levelControl.max = PRESSURE_LEVELS.length;
   levelControl.disabled = weather !== openMeteoWeather;
   levelControl.title = levelControl.disabled ? 'Flight levels require ?weather=open-meteo' : 'Wind and crop weather at this pressure level; altitude above sea level';
-  levelControl.addEventListener('change', function () {
-    selectPressureLevel(levelControl.value === '' ? null : Number(levelControl.value));
+  function syncFlightLevel() {
+    const label = pressureLevel === null ? 'surface' : pressureLevel + ' hPa';
+    document.getElementById('flight-level-value').textContent = label;
+    levelControl.setAttribute('aria-valuetext', label);
+  }
+  syncFlightLevel();
+  levelControl.addEventListener('input', function () {
+    const index = Number(levelControl.value);
+    selectPressureLevel(index === 0 ? null : PRESSURE_LEVELS[index - 1]);
+    syncFlightLevel();
     document.getElementById('sim').textContent = weatherNote();
   });
 
