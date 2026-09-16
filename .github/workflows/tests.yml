@@ -22,4 +22,6 @@ jobs:
           node-version: '22'
           package-manager-cache: false
       - name: Run weather and movement tests
-        run: node --test tests/*.test.cjs
+        run: node --test __tests__/*.test.cjs
+      - name: Run script tests
+        run: node --test scripts/__tests__/*.test.cjs

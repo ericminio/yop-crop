@@ -108,7 +108,7 @@ test('failed refresh keeps cached wind and waits a minute before retrying', asyn
     run(`Date.now = () => ${when + 60000}`);
     await prime();
     assert.equal(requests, 2);
-    assert.equal(run('openMeteoWeather.at(0, 0, Date.now()).wind_speed_10m'), 12);
+    assert.equal(run('flightAt(0, 0, Date.now()).speed'), 12);
   }
 });
 
@@ -126,7 +126,25 @@ test('forecast wind drives state and selects the nearest hour', () => {
   run('readState()');
   assert.equal(run('sim.drift'), 24);
   assert.equal(run('sim.hdg'), 90);
-  assert.equal(run('openMeteoWeather.at(0, 0, Date.now() + 3600000).wind_speed_10m'), 32);
+  assert.equal(run('flightAt(0, 0, Date.now() + 3600000).speed'), 32);
+});
+
+test('Open-Meteo crop weather never exposes a separate flight wind, including surface fallback', () => {
+  for (const level of [null, 850]) {
+    for (const mutation of ['', 'openMeteoWeather.cache.clear()', 'daily.time = [0]',
+      'hourly.wind_speed_10m[0] = null']) {
+      const run = app('open-meteo');
+      forecast(run, 24, 270);
+      run(`pressureLevel = ${level}; ${mutation}`);
+      assert.equal(run("'wind_speed_10m' in openMeteoWeather.at(0, 0, Date.now())"), false);
+      assert.equal(run("'wind_direction_10m' in openMeteoWeather.at(0, 0, Date.now())"), false);
+      if (level === null) {
+        assert.equal(run('openMeteoWeather.at(0, 0, Date.now()).temperature_2m'),
+          mutation === 'openMeteoWeather.cache.clear()' || mutation === 'daily.time = [0]'
+            ? run('simulatedWeather.at(0, 0, Date.now()).temperature_2m') : 10);
+      }
+    }
+  }
 });
 
 test('wind bearings convert to travel bearings, including wraparound', () => {
@@ -145,15 +163,15 @@ test('calm wind remains zero', () => {
   assert.equal(run('sim.drift'), 0);
 });
 
-test('missing coverage or invalid wind falls back to simulated wind', () => {
+test('missing coverage or invalid wind leaves the flight heading unavailable', () => {
   for (const mutation of [null, 'hourly.wind_speed_10m[0] = null',
     'delete hourly.wind_direction_10m', 'hourly.wind_speed_10m[0] = -1',
     'hourly.wind_direction_10m[0] = NaN', 'daily.time = [0]']) {
     const run = app('open-meteo');
     if (mutation) { forecast(run); run(mutation); }
     run('readState()');
-    assert.equal(run('sim.drift'), run('simulatedWeather.at(0, 0, Date.now()).wind_speed_10m'));
-    assert.equal(run('sim.hdg'), run('(simulatedWeather.at(0, 0, Date.now()).wind_direction_10m + 180) % 360'));
+    assert.equal(run('sim.flightAvailable'), false);
+    assert.equal(run('sim.drift'), 0);
   }
 });
 

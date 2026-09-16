@@ -10,8 +10,12 @@ its crops need.
 
 The default simulated adapter generates weather, including wind. Open
 `index.html?weather=open-meteo` to use Open-Meteo forecasts, with simulated
-conditions as the fallback when forecast coverage is unavailable. Missing wind
-samples also fall back to simulated wind.
+crop conditions as the fallback when surface forecast coverage is unavailable.
+Drift and the heading display only use forecast wind in Open-Meteo mode;
+missing or invalid wind pauses drift and hides the map's direction arrow.
+The Open-Meteo weather adapter returns crop conditions only. Surface and
+pressure-level flight wind use the same reader and validation; the selected
+level determines the forecast fields, and pressure levels also require altitude.
 
 Cached forecasts refresh after 15 minutes, even when the platform is stationary.
 The last usable forecast remains available during refresh. Failed requests retry
@@ -34,6 +38,8 @@ Cached data remains usable during refresh under the existing cache policy.
 When drift reaches a location without a cached forecast, elapsed movement time
 is retained while that location's forecast loads. Catch-up continues with the
 selected level's wind after loading, including after an overnight tab suspension.
+This also applies to surface wind: crossing into an uncached location waits for
+its forecast instead of moving with simulated wind.
 Changing levels or manually relocating starts a new movement interval.
 
 Crop temperature, humidity and cloud cover also come from the selected level.
@@ -102,14 +108,79 @@ The pressure levels and variables are documented in the
 Position advances in real time with the selected adapter's wind, starting from
 the initial position. Selecting a new position resets the movement clock there.
 The map and coordinates follow the drift; scrubbing the crop timeline does not
-move the platform. After a suspended tab resumes, elapsed time is integrated in
-steps using weather along the route (simulated fallback in surface mode, paused
-drift for unavailable pressure-level data). Reloading starts a new session;
+move the platform. An amber trail in the Position panel follows the route from
+the session's starting position to FF1, retaining a point each minute plus its
+live position. Clicking to relocate clears the trail and starts it there.
+After a suspended tab resumes, elapsed time is integrated in
+steps using weather along the route, waiting for uncached route forecasts in
+Open-Meteo mode and pausing drift for unavailable wind samples. Reloading starts a new session;
 the flight path and selected level are not persisted.
 
-Run the weather and movement checks with `node --test tests/*.test.cjs`.
+Run the weather and movement checks with `node --test __tests__/*.test.cjs`.
 The `Tests` GitHub Actions check runs both suites on every pull request and on
 pushes to `dev`, using Node.js 22.
+
+## Duplication detection
+
+Run `node scripts/check-duplication.cjs index.html` to find repeated code within
+and across JavaScript files and inline HTML scripts. This custom detector uses
+only Node.js built-ins; there is nothing to install. Pass multiple files to
+compare them, or add `--json` for structured output with source line ranges.
+
+The detector compares contiguous token sequences throughout the source, including
+calculations, loops, drawing code, arrow functions and methods. It has no rules
+for particular application fields, wind data or validation functions.
+Whitespace and comments are ignored. The default `--mode normalized` treats
+variable and function identifiers as interchangeable, while preserving property
+names, all literal values, keywords and operators. Dot/optional-access properties,
+object keys, shorthand properties and method names are recognized from nearby
+tokens. For example, `by - 4` and `by - 5`, or `'click'` and `'wheel'`, remain
+different. Regular-expression patterns and flags are preserved too.
+`--mode exact` retains all token names and
+values too. Matches are extended to their maximal non-overlapping lengths.
+
+Defaults are `--min-tokens 50 --min-lines 5`. Both copies must meet both thresholds.
+Matches must also contain at least four identifier/keyword tokens comprising at
+least 10% of the matched tokens, to avoid flooding the report with literal-data
+lists. Lower thresholds find smaller fragments but produce more review noise.
+
+This is a general-purpose code-clone detector, not a proof of equivalent behavior.
+It cannot equate rewritten algorithms, dot access with computed access, or
+positive checks with inverted rejection branches. Normalized matches can also
+represent intentional similarities. Review findings before refactoring.
+The lightweight JavaScript tokenizer treats string, template and common regex
+literals as opaque tokens; it does not analyze template interpolation or validate
+JavaScript syntax. HTML markup, CSS and non-JavaScript script blocks are excluded.
+
+Exit status is `0` for no clones, `1` for clones, and `2` for input or tokenization
+errors. Script regression tests run with `node --test scripts/__tests__/*.test.cjs`.
+
+### Local pre-push check
+
+Enable the local hook with `git config --local core.hooksPath .githooks` and
+`git config --local duplication.baseRef refs/remotes/origin/dev`.
+The hook requires Node.js on PATH. It runs locally only; there is no duplication
+gate in CI. Hook and detector files must be present in this checkout.
+
+For each branch update, it compares the exact commit Git is about to push against
+its common ancestor with the configured base. If no base is configured, it uses
+the destination remote's local HEAD reference. It reads source files directly
+from Git objects, so uncommitted edits do not affect the result and no temporary
+checkout is needed. It does not fetch: refresh the base reference before pushing
+when a newer comparison point is needed.
+
+Both snapshots use the same locally installed detector with normalized mode,
+50 tokens and 5 lines. Tracked JavaScript and inline HTML scripts are included;
+test/spec files and test, __tests__, e2e, fixture, dependency, vendor, build, distribution
+and coverage directories are excluded. Branch deletions and tag updates are
+skipped. Other branch updates in the same push are checked independently.
+
+The hook compares normalized 50-token windows within reported clones and their
+occurrence counts. It blocks newly duplicated windows or additional copies of
+existing ones, without relying on filenames or line numbers to identify them.
+Moving an existing duplicate is allowed. Removing unrelated duplication does
+not offset a new duplicate. A scan, configuration or Git error blocks the push
+with an error message instead of being treated as zero duplication.
 
 ## Design premise
 
