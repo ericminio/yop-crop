@@ -83,7 +83,11 @@
   #ident .big { color: var(--cyan); letter-spacing: 0.06em; }
   #top .spacer { flex: 1; border-right: 0; padding: 0; }
   .chip { display: inline-block; padding: 1px 6px; border: 1px solid currentColor;
+    background: transparent; color: inherit; font-family: inherit;
     font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase; }
+  button.chip:enabled { cursor: pointer; pointer-events: auto; }
+  button.chip:enabled:hover { background: rgba(255,200,97,0.12); }
+  button.chip:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 
   .gauge { width: 150px; height: 7px; position: relative; margin-top: 5px;
     background: rgba(255,255,255,0.07); border: 1px solid rgba(111,224,255,0.18); }
@@ -206,7 +210,7 @@
   <div id="top">
     <div class="cell" id="ident">
       <div class="lab">Vehicle</div><div class="big">FF1</div>
-      <div class="sub">flying farm &middot; <span id="status" class="chip">nominal</span></div>
+      <div class="sub">flying farm &middot; <button type="button" id="status" class="chip" disabled>nominal</button></div>
     </div>
     <div class="cell">
       <div class="lab">Mission clock</div><div class="big" id="clock">--:--:--</div>
@@ -498,31 +502,41 @@
     retryAt: 0,
     pending: false,
     key: function (lat, lon) { return lat.toFixed(2) + ',' + lon.toFixed(2); },
-    prime: function (points, pastDays) {
+    prime: function (points, pastDays, force) {
       const now = Date.now();
-      if (this.pending || now < this.retryAt) return;
+      if (this.pending || (!force && now < this.retryAt)) return;
       const self = this;
       const miss = points.filter(function (pt) {
         const key = self.key(pt.lat, pt.lon);
-        return !self.cache.has(key) || !self.fetchedAt.has(key) ||
+        return force || !self.cache.has(key) || !self.fetchedAt.has(key) ||
           now - self.fetchedAt.get(key) >= self.refreshMs;
       });
       if (!miss.length) return;
       this.pending = true;
       this.retryAt = now + 60000;
       const back = Math.max(1, Math.min(92, Math.ceil(pastDays || 1)));
-      fetch(this.endpoint +
+      const controller = new AbortController();
+      let timer;
+      const timeout = new Promise(function (_, reject) {
+        timer = setTimeout(function () {
+          reject(new Error('Weather request timed out'));
+          controller.abort();
+        }, 15000);
+      });
+      const request = fetch(this.endpoint +
         '?latitude=' + miss.map(function (pt) { return pt.lat.toFixed(4); }).join(',') +
         '&longitude=' + miss.map(function (pt) { return pt.lon.toFixed(4); }).join(',') +
         '&hourly=' + this.hourly.join(',') +
         '&daily=' + this.daily.join(',') +
         '&wind_speed_unit=kmh' +
         '&past_days=' + back +
-        '&forecast_days=' + FORECAST_DAYS + '&timeformat=unixtime&timezone=UTC')
+        '&forecast_days=' + FORECAST_DAYS + '&timeformat=unixtime&timezone=UTC',
+        { signal: controller.signal })
         .then(function (r) {
           if (!r.ok) throw new Error('Weather request failed');
           return r.json();
-        })
+        });
+      Promise.race([request, timeout])
         .then(function (body) {
           const rows = Array.isArray(body) ? body : [body];
           let loaded = 0;
@@ -541,7 +555,8 @@
         .catch(function () {
           self.retryAt = Date.now() + 60000;
           self.pending = false;
-        });
+        })
+        .finally(function () { clearTimeout(timer); });
     },
     covers: function (row, when) {
       const t = row.daily.time, sec = when / 1000;
@@ -1701,6 +1716,13 @@
    'croplist','candlist','status','cropwhen','candtag']
    .forEach(function(id){ el[id] = document.getElementById(id); });
 
+  el.status.addEventListener('click', function () {
+    if (el.status.disabled || weather !== openMeteoWeather) return;
+    weather.prime([{ lat: sim.lat, lon: sim.lon }], (Date.now() - LAUNCH) / 86400000 + 2, true);
+    el.status.disabled = true;
+    el.status.textContent = 'retrying weather…';
+  });
+
   function hhmm(h){ const H=Math.floor(((h%24)+24)%24), M=Math.floor((h-Math.floor(h))*60);
     return pad2(H)+':'+pad2((M+60)%60); }
   function hours(h){ const t=Math.round(h*60);
@@ -2013,7 +2035,11 @@
     const stallDay = tracks[SCORE_CROP].stall;
     const doomed = stallDay !== null;
     const ok = inBand && marg > 3 && sim.fuel > 0.2 && !doomed && Number.isFinite(st.dli);
-    el.status.textContent = !Number.isFinite(st.temp) ? 'weather unavailable'
+    const unavailable = weather === openMeteoWeather && (!Number.isFinite(st.temp) || !sim.flightAvailable);
+    el.status.disabled = !unavailable || openMeteoWeather.pending;
+    el.status.title = unavailable ? 'Fetch weather again without resetting this tab' : '';
+    el.status.textContent = unavailable
+      ? (openMeteoWeather.pending ? 'retrying weather…' : 'weather unavailable · retry')
       : !doomed ? (ok ? 'nominal' : 'attention')
       : stallDay <= st.missionDay ? 'stalled'
       : 'stall in ' + Math.round(stallDay - st.missionDay) + ' d';

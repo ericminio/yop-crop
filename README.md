@@ -22,6 +22,14 @@ The last usable forecast remains available during refresh. Failed requests retry
 after one minute. These checks run when animation frames run, so returning to a
 suspended tab also triggers any overdue refresh.
 
+When current crop weather or wind is unavailable, the header status becomes a
+“weather unavailable · retry” button. Clicking it fetches the current location
+immediately, bypassing the cache age and retry delay while retaining location,
+flight level, sowing dates and the flight trail. It shows “retrying weather…”
+and is disabled during the request. Requests time out after 15 seconds, including
+response loading, then allow another manual attempt or an automatic retry after
+one minute. Recovery does not require reloading the page.
+
 Surface wind (10 m) remains the default drift approximation. In Open-Meteo mode,
 the Flight level selector also offers the 19 discrete pressure levels from
 1000 to 30 hPa. Drift and arrival estimates use the selected level's wind speed;

@@ -6,10 +6,11 @@ const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const when = Date.UTC(2026, 8, 14, 12);
 
-function app(provider = 'simulated', fetch = async () => { throw Error('offline'); }) {
+function app(provider = 'simulated', fetch = async () => { throw Error('offline'); }, globals = {}) {
   const context = vm.createContext({
     URLSearchParams, location: { search: '?weather=' + provider }, fetch,
-    Date: class extends Date { static now() { return when; } }
+    Date: class extends Date { static now() { return when; } },
+    AbortController, setTimeout, clearTimeout, ...globals
   });
   vm.runInContext(script.slice(script.indexOf("  'use strict';"),
     script.indexOf('  function dayMs(')), context);
