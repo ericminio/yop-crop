@@ -13,6 +13,9 @@ The default simulated adapter generates weather, including wind. Open
 crop conditions as the fallback when surface forecast coverage is unavailable.
 Drift and the heading display only use forecast wind in Open-Meteo mode;
 missing or invalid wind pauses drift and hides the map's direction arrow.
+The Open-Meteo weather adapter returns crop conditions only. Surface and
+pressure-level flight wind use the same reader and validation; the selected
+level determines the forecast fields, and pressure levels also require altitude.
 
 Cached forecasts refresh after 15 minutes, even when the platform is stationary.
 The last usable forecast remains available during refresh. Failed requests retry

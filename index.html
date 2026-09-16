@@ -538,15 +538,13 @@
     at: function (lat, lon, when) {
       if (pressureLevel !== null) return pressureWeatherAt(lat, lon, when);
       const row = this.cache.get(this.key(lat, lon));
-      if (!row || !this.covers(row, when)) return simulatedWeather.at(lat, lon, when);
+      if (!row || !this.covers(row, when)) {
+        const { wind_speed_10m, wind_direction_10m, ...cropWeather } = simulatedWeather.at(lat, lon, when);
+        return cropWeather;
+      }
       const sec = when / 1000;
       const h = nearestIndex(row.hourly.time, sec);
       const d = nearestIndex(row.daily.time, sec);
-      const speed = row.hourly.wind_speed_10m?.[h];
-      const direction = row.hourly.wind_direction_10m?.[h];
-      const wind = Number.isFinite(speed) && speed >= 0 && Number.isFinite(direction)
-        ? { wind_speed_10m: speed, wind_direction_10m: direction }
-        : simulatedWeather.at(lat, lon, when);
       return {
         temperature_2m: row.hourly.temperature_2m[h],
         temperature_2m_max: row.daily.temperature_2m_max[d],
@@ -556,9 +554,7 @@
         shortwave_radiation_sum: row.daily.shortwave_radiation_sum[d],
         daylight_duration: row.daily.daylight_duration[d],
         et0_fao_evapotranspiration: row.daily.et0_fao_evapotranspiration[d],
-        cloud_cover: row.hourly.cloud_cover[h],
-        wind_speed_10m: wind.wind_speed_10m,
-        wind_direction_10m: wind.wind_direction_10m
+        cloud_cover: row.hourly.cloud_cover[h]
       };
     }
   };
