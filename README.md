@@ -155,6 +155,33 @@ JavaScript syntax. HTML markup, CSS and non-JavaScript script blocks are exclude
 Exit status is `0` for no clones, `1` for clones, and `2` for input or tokenization
 errors. Script regression tests run with `node --test scripts/__tests__/*.test.cjs`.
 
+### Local pre-push check
+
+Enable the local hook with `git config --local core.hooksPath .githooks` and
+`git config --local duplication.baseRef refs/remotes/origin/dev`.
+The hook requires Node.js on PATH. It runs locally only; there is no duplication
+gate in CI. Hook and detector files must be present in this checkout.
+
+For each branch update, it compares the exact commit Git is about to push against
+its common ancestor with the configured base. If no base is configured, it uses
+the destination remote's local HEAD reference. It reads source files directly
+from Git objects, so uncommitted edits do not affect the result and no temporary
+checkout is needed. It does not fetch: refresh the base reference before pushing
+when a newer comparison point is needed.
+
+Both snapshots use the same locally installed detector with normalized mode,
+50 tokens and 5 lines. Tracked JavaScript and inline HTML scripts are included;
+test/spec files and test, __tests__, e2e, fixture, dependency, vendor, build, distribution
+and coverage directories are excluded. Branch deletions and tag updates are
+skipped. Other branch updates in the same push are checked independently.
+
+The hook compares normalized 50-token windows within reported clones and their
+occurrence counts. It blocks newly duplicated windows or additional copies of
+existing ones, without relying on filenames or line numbers to identify them.
+Moving an existing duplicate is allowed. Removing unrelated duplication does
+not offset a new duplicate. A scan, configuration or Git error blocks the push
+with an error message instead of being treated as zero duplication.
+
 ## Design premise
 
 The platform has no fixed season. It flies to stay in the air temperature its crops
