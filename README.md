@@ -116,9 +116,44 @@ steps using weather along the route, waiting for uncached route forecasts in
 Open-Meteo mode and pausing drift for unavailable wind samples. Reloading starts a new session;
 the flight path and selected level are not persisted.
 
-Run the weather and movement checks with `node --test tests/*.test.cjs`.
+Run the weather and movement checks with `node --test __tests__/*.test.cjs`.
 The `Tests` GitHub Actions check runs both suites on every pull request and on
 pushes to `dev`, using Node.js 22.
+
+## Duplication detection
+
+Run `node scripts/check-duplication.cjs index.html` to find repeated code within
+and across JavaScript files and inline HTML scripts. This custom detector uses
+only Node.js built-ins; there is nothing to install. Pass multiple files to
+compare them, or add `--json` for structured output with source line ranges.
+
+The detector compares contiguous token sequences throughout the source, including
+calculations, loops, drawing code, arrow functions and methods. It has no rules
+for particular application fields, wind data or validation functions.
+Whitespace and comments are ignored. The default `--mode normalized` treats
+variable and function identifiers as interchangeable, while preserving property
+names, all literal values, keywords and operators. Dot/optional-access properties,
+object keys, shorthand properties and method names are recognized from nearby
+tokens. For example, `by - 4` and `by - 5`, or `'click'` and `'wheel'`, remain
+different. Regular-expression patterns and flags are preserved too.
+`--mode exact` retains all token names and
+values too. Matches are extended to their maximal non-overlapping lengths.
+
+Defaults are `--min-tokens 50 --min-lines 5`. Both copies must meet both thresholds.
+Matches must also contain at least four identifier/keyword tokens comprising at
+least 10% of the matched tokens, to avoid flooding the report with literal-data
+lists. Lower thresholds find smaller fragments but produce more review noise.
+
+This is a general-purpose code-clone detector, not a proof of equivalent behavior.
+It cannot equate rewritten algorithms, dot access with computed access, or
+positive checks with inverted rejection branches. Normalized matches can also
+represent intentional similarities. Review findings before refactoring.
+The lightweight JavaScript tokenizer treats string, template and common regex
+literals as opaque tokens; it does not analyze template interpolation or validate
+JavaScript syntax. HTML markup, CSS and non-JavaScript script blocks are excluded.
+
+Exit status is `0` for no clones, `1` for clones, and `2` for input or tokenization
+errors. Script regression tests run with `node --test scripts/__tests__/*.test.cjs`.
 
 ## Design premise
 
