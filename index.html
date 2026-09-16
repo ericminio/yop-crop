@@ -1095,6 +1095,19 @@
     tctx.setTransform(dpr,0,0,dpr,0,0);
   }
 
+  function drawTimelineMarker(x, top, bottom, { color, width = 1, dash = [], label }) {
+    tctx.strokeStyle = color; tctx.lineWidth = width;
+    tctx.setLineDash(dash);
+    tctx.beginPath(); tctx.moveTo(x, top); tctx.lineTo(x, bottom); tctx.stroke();
+    tctx.setLineDash([]);
+    if (label) {
+      tctx.fillStyle = label.color ?? color; tctx.textAlign = 'left';
+      tctx.textBaseline = label.baseline ?? 'bottom';
+      tctx.font = '8.5px ui-monospace, Menlo, monospace';
+      tctx.fillText(label.text, x + 3, label.y);
+    }
+  }
+
   function drawTimeline(st, markDay, tracks) {
     const r = tlc.getBoundingClientRect(), W = r.width, H = r.height;
     if (W < 2) return;
@@ -1168,11 +1181,10 @@
       } else {
         const mx = X(track.sown);
         if (mx > padL - 4 && mx < padL + plotW) {
-          tctx.strokeStyle = '#6fe0ff'; tctx.lineWidth = 1.2;
-          tctx.beginPath(); tctx.moveTo(mx, by - 5); tctx.lineTo(mx, by + bh + 5); tctx.stroke();
-          tctx.fillStyle = '#6fe0ff'; tctx.textAlign = 'left'; tctx.textBaseline = 'bottom';
-          tctx.font = '8.5px ui-monospace, Menlo, monospace';
-          tctx.fillText('sown D' + Math.round(track.sown), mx + 3, by - 4);
+          drawTimelineMarker(mx, by - 5, by + bh + 5, {
+            color: '#6fe0ff', width: 1.2,
+            label: { text: 'sown D' + Math.round(track.sown), y: by - 4 }
+          });
         }
       }
 
@@ -1192,39 +1204,30 @@
           tctx.fillRect(sx, by, sb - sx, bh);
         }
         if (sx > padL && sx < padL + plotW) {
-          tctx.strokeStyle = '#ff7a6e'; tctx.lineWidth = 1.5;
-          tctx.beginPath(); tctx.moveTo(sx, by - 4); tctx.lineTo(sx, by + bh + 4); tctx.stroke();
-          tctx.fillStyle = '#ff7a6e'; tctx.textAlign = 'left'; tctx.textBaseline = 'bottom';
-          tctx.font = '8.5px ui-monospace, Menlo, monospace';
-          tctx.fillText('stall D' + Math.round(track.stall), sx + 3, by - 3);
+          drawTimelineMarker(sx, by - 4, by + bh + 4, {
+            color: '#ff7a6e', width: 1.5,
+            label: { text: 'stall D' + Math.round(track.stall), y: by - 3 }
+          });
         }
       }
     }
 
     const hx2 = X(st.missionDay + FORECAST_DAYS);
     if (hx2 > padL && hx2 < padL + plotW) {
-      tctx.save();
-      tctx.strokeStyle = 'rgba(111,224,255,0.35)'; tctx.lineWidth = 1;
-      tctx.setLineDash([2,3]);
-      tctx.beginPath(); tctx.moveTo(hx2, padT-6); tctx.lineTo(hx2, H-padB+3); tctx.stroke();
-      tctx.restore();
-      tctx.fillStyle = 'rgba(122,163,184,0.85)'; tctx.textAlign = 'left';
-      tctx.textBaseline = 'top'; tctx.font = '8.5px ui-monospace, Menlo, monospace';
-      tctx.fillText('projected', hx2 + 3, padT - 14);
+      drawTimelineMarker(hx2, padT - 6, H - padB + 3, {
+        color: 'rgba(111,224,255,0.35)', dash: [2, 3],
+        label: { text: 'projected', y: padT - 14, color: 'rgba(122,163,184,0.85)', baseline: 'top' }
+      });
     }
 
     if (scrub !== null) {
       const rx = X(st.missionDay);
-      tctx.strokeStyle='rgba(255,200,97,0.30)'; tctx.lineWidth=1;
-      tctx.setLineDash([3,3]);
-      tctx.beginPath(); tctx.moveTo(rx,padT-8); tctx.lineTo(rx,H-padB+2); tctx.stroke();
-      tctx.setLineDash([]);
+      drawTimelineMarker(rx, padT - 8, H - padB + 2, { color: 'rgba(255,200,97,0.30)', dash: [3, 3] });
     }
     const nx = X(markDay);
-    tctx.strokeStyle = scrub === null ? '#ffc861' : '#6fe0ff';
-    tctx.lineWidth=1.8;
-    tctx.beginPath(); tctx.moveTo(nx,padT-10); tctx.lineTo(nx,H-padB+2); tctx.stroke();
-    tctx.fillStyle = scrub === null ? '#ffc861' : '#6fe0ff';
+    const markColor = scrub === null ? '#ffc861' : '#6fe0ff';
+    drawTimelineMarker(nx, padT - 10, H - padB + 2, { color: markColor, width: 1.8 });
+    tctx.fillStyle = markColor;
     tctx.beginPath(); tctx.moveTo(nx,padT-9); tctx.lineTo(nx-5,padT-16);
     tctx.lineTo(nx+5,padT-16); tctx.closePath(); tctx.fill();
     tctx.fillRect(nx-5, padT-16, 10, 3);
