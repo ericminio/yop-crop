@@ -83,7 +83,11 @@
   #ident .big { color: var(--cyan); letter-spacing: 0.06em; }
   #top .spacer { flex: 1; border-right: 0; padding: 0; }
   .chip { display: inline-block; padding: 1px 6px; border: 1px solid currentColor;
+    background: transparent; color: inherit; font-family: inherit;
     font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase; }
+  button.chip:enabled { cursor: pointer; pointer-events: auto; }
+  button.chip:enabled:hover { background: rgba(255,200,97,0.12); }
+  button.chip:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 
   .gauge { width: 150px; height: 7px; position: relative; margin-top: 5px;
     background: rgba(255,255,255,0.07); border: 1px solid rgba(111,224,255,0.18); }
@@ -206,7 +210,7 @@
   <div id="top">
     <div class="cell" id="ident">
       <div class="lab">Vehicle</div><div class="big">FF1</div>
-      <div class="sub">flying farm &middot; <span id="status" class="chip">nominal</span></div>
+      <div class="sub">flying farm &middot; <button type="button" id="status" class="chip" disabled>nominal</button></div>
     </div>
     <div class="cell">
       <div class="lab">Mission clock</div><div class="big" id="clock">--:--:--</div>
@@ -498,31 +502,41 @@
     retryAt: 0,
     pending: false,
     key: function (lat, lon) { return lat.toFixed(2) + ',' + lon.toFixed(2); },
-    prime: function (points, pastDays) {
+    prime: function (points, pastDays, force) {
       const now = Date.now();
-      if (this.pending || now < this.retryAt) return;
+      if (this.pending || (!force && now < this.retryAt)) return;
       const self = this;
       const miss = points.filter(function (pt) {
         const key = self.key(pt.lat, pt.lon);
-        return !self.cache.has(key) || !self.fetchedAt.has(key) ||
+        return force || !self.cache.has(key) || !self.fetchedAt.has(key) ||
           now - self.fetchedAt.get(key) >= self.refreshMs;
       });
       if (!miss.length) return;
       this.pending = true;
       this.retryAt = now + 60000;
       const back = Math.max(1, Math.min(92, Math.ceil(pastDays || 1)));
-      fetch(this.endpoint +
+      const controller = new AbortController();
+      let timer;
+      const timeout = new Promise(function (_, reject) {
+        timer = setTimeout(function () {
+          reject(new Error('Weather request timed out'));
+          controller.abort();
+        }, 15000);
+      });
+      const request = fetch(this.endpoint +
         '?latitude=' + miss.map(function (pt) { return pt.lat.toFixed(4); }).join(',') +
         '&longitude=' + miss.map(function (pt) { return pt.lon.toFixed(4); }).join(',') +
         '&hourly=' + this.hourly.join(',') +
         '&daily=' + this.daily.join(',') +
         '&wind_speed_unit=kmh' +
         '&past_days=' + back +
-        '&forecast_days=' + FORECAST_DAYS + '&timeformat=unixtime&timezone=UTC')
+        '&forecast_days=' + FORECAST_DAYS + '&timeformat=unixtime&timezone=UTC',
+        { signal: controller.signal })
         .then(function (r) {
           if (!r.ok) throw new Error('Weather request failed');
           return r.json();
-        })
+        });
+      Promise.race([request, timeout])
         .then(function (body) {
           const rows = Array.isArray(body) ? body : [body];
           let loaded = 0;
@@ -541,7 +555,8 @@
         .catch(function () {
           self.retryAt = Date.now() + 60000;
           self.pending = false;
-        });
+        })
+        .finally(function () { clearTimeout(timer); });
     },
     covers: function (row, when) {
       const t = row.daily.time, sec = when / 1000;
@@ -600,6 +615,7 @@
 
   let positionTime = null;
   let positionTrail = [];
+  let flightLevels = [];
 
   function recordPosition(time) {
     const last = positionTrail[positionTrail.length - 1];
@@ -699,20 +715,26 @@
     return Math.max(0, 0.408 * slope * net / (slope + gamma));
   }
 
-  function flightAt(lat, lon, when) {
-    if (pressureLevel === null && weather !== openMeteoWeather) {
+  function flightAt(lat, lon, when, level = pressureLevel) {
+    if (level === null && weather !== openMeteoWeather) {
       const wx = weather.at(lat, lon, when);
       return { speed: wx.wind_speed_10m, direction: wx.wind_direction_10m, altitude: null };
     }
-    const row = weather === openMeteoWeather && openMeteoWeather.cache.get(openMeteoWeather.key(lat, lon));
+    const key = openMeteoWeather.key(lat, lon);
+    const row = weather === openMeteoWeather && openMeteoWeather.cache.get(key);
+    const fetched = openMeteoWeather.fetchedAt.get(key);
+    if (!Number.isFinite(fetched) || Date.now() - fetched >= openMeteoWeather.refreshMs) return null;
     if (!row || !openMeteoWeather.covers(row, when)) return null;
-    const h = nearestIndex(row.hourly.time, when / 1000);
-    const suffix = pressureLevel === null ? '10m' : pressureLevel + 'hPa';
+    const times = row.hourly.time, sec = when / 1000;
+    if (sec < times[0] || sec > times[times.length - 1]) return null;
+    const h = nearestIndex(times, sec);
+    if (Math.abs(times[h] - sec) > 1800) return null;
+    const suffix = level === null ? '10m' : level + 'hPa';
     const speed = row.hourly['wind_speed_' + suffix]?.[h];
     const direction = row.hourly['wind_direction_' + suffix]?.[h];
-    const altitude = pressureLevel === null ? null : row.hourly['geopotential_height_' + suffix]?.[h];
+    const altitude = level === null ? null : row.hourly['geopotential_height_' + suffix]?.[h];
     if (!Number.isFinite(speed) || speed < 0 || !Number.isFinite(direction) ||
-        direction < 0 || direction > 360 || (pressureLevel !== null && !Number.isFinite(altitude))) return null;
+        direction < 0 || direction > 360 || (level !== null && !Number.isFinite(altitude))) return null;
     return { speed: speed, direction: direction, altitude: altitude };
   }
 
@@ -720,27 +742,35 @@
     if (level !== null && !PRESSURE_LEVELS.includes(level)) throw new RangeError('Unknown pressure level');
     advancePosition(Date.now());
     pressureLevel = level;
-    positionTime = Date.now();
+    flightLevels.push({ time: Date.now(), level: level });
     readState();
   }
 
   function advancePosition(now) {
     if (positionTrail.length === 0) recordPosition(positionTime === null ? now : positionTime);
     if (positionTime === null || now <= positionTime) {
-      positionTime = now;
+      if (positionTime === null) positionTime = now;
+      if (!flightLevels.length) flightLevels.push({ time: positionTime, level: pressureLevel });
       return;
     }
     const steps = Math.min(240, Math.ceil((now - positionTime) / 60000));
-    const dt = (now - positionTime) / steps;
-    for (let i = 0; i < steps; i++) {
-      if (weather === openMeteoWeather &&
-          !openMeteoWeather.cache.has(openMeteoWeather.key(sim.lat, sim.lon))) {
-        weather.prime([{ lat: sim.lat, lon: sim.lon }], (now - positionTime) / 86400000 + 2);
+    const interval = weather === openMeteoWeather ? 60000 : (now - positionTime) / steps;
+    for (let i = 0; i < steps && positionTime < now; i++) {
+      while (flightLevels.length > 1 && flightLevels[1].time <= positionTime) flightLevels.shift();
+      const level = flightLevels.length ? flightLevels[0].level : pressureLevel;
+      const nextLevelTime = flightLevels.length > 1 ? flightLevels[1].time : now;
+      const dt = Math.min(interval, now - positionTime, nextLevelTime - positionTime);
+      const flight = flightAt(sim.lat, sim.lon, positionTime, level);
+      if (!flight || (weather === openMeteoWeather && !flightAt(sim.lat, sim.lon, positionTime + dt, level))) {
+        if (weather === openMeteoWeather) {
+          const fetched = weather.fetchedAt.get(weather.key(sim.lat, sim.lon));
+          if (now >= weather.retryAt && (!Number.isFinite(fetched) || now - fetched >= 60000)) {
+            weather.prime([{ lat: sim.lat, lon: sim.lon }], (now - positionTime) / 86400000 + 2, true);
+          }
+        }
         return;
       }
-      const flight = flightAt(sim.lat, sim.lon, positionTime);
       positionTime += dt;
-      if (!flight) continue;
       const distance = flight.speed * dt / 3600000;
       if (distance === 0) continue;
       const arc = distance / 6371, bearing = (flight.direction + 180) * D;
@@ -753,7 +783,6 @@
       sim.lon = ((nextLon / D + 180) % 360 + 360) % 360 - 180;
       recordPosition(positionTime);
     }
-    positionTime = now;
   }
 
   function readState() {
@@ -768,6 +797,7 @@
     const wx = weather.at(sim.lat, sim.lon, now);
     const flight = flightAt(sim.lat, sim.lon, now);
     sim.flightAvailable = !!flight;
+    sim.positionUncertain = positionTime < now;
     sim.alt = flight ? flight.altitude : null;
     sim.drift = flight ? flight.speed : 0;
     sim.hdg = flight ? (flight.direction + 180) % 360 : 0;
@@ -1584,6 +1614,8 @@
 
     const trail = positionTrail.concat([{ lat: sim.lat, lon: sim.lon }]);
     mctx.strokeStyle = '#ffc861'; mctx.lineWidth = 2;
+    mctx.setLineDash(sim.positionUncertain ? [1, 5] : []);
+    mctx.lineCap = sim.positionUncertain ? 'round' : 'butt';
     mctx.beginPath();
     for (let i = 1; i < trail.length; i++) {
       const from = trail[i - 1], to = trail[i];
@@ -1598,6 +1630,7 @@
       }
     }
     mctx.stroke(); mctx.lineWidth = 1;
+    mctx.setLineDash([]); mctx.lineCap = 'butt';
 
     let mlon = sim.lon;
     while (mlon - cLon > 180) mlon -= 360;
@@ -1700,6 +1733,13 @@
    'margin','envt','fuel','burn','teth','tilt','lifttag','wres','wdraw','et','wcap','wdays',
    'croplist','candlist','status','cropwhen','candtag']
    .forEach(function(id){ el[id] = document.getElementById(id); });
+
+  el.status.addEventListener('click', function () {
+    if (el.status.disabled || weather !== openMeteoWeather) return;
+    weather.prime([{ lat: sim.lat, lon: sim.lon }], (Date.now() - Math.min(LAUNCH, positionTime ?? Date.now())) / 86400000 + 2, true);
+    el.status.disabled = true;
+    el.status.textContent = 'retrying weather…';
+  });
 
   function hhmm(h){ const H=Math.floor(((h%24)+24)%24), M=Math.floor((h-Math.floor(h))*60);
     return pad2(H)+':'+pad2((M+60)%60); }
@@ -1874,7 +1914,8 @@
     el.alt.textContent = pressureLevel === null ? 'surface' :
       sim.alt === null ? 'altitude unavailable' : Math.round(sim.alt)+' m ASL';
     el.hdg.textContent = sim.flightAvailable ? pad2(Math.round(sim.hdg))+'°' : '—';
-    el.drift.textContent = sim.flightAvailable ? sim.drift.toFixed(0)+' km/h' : 'wind unavailable · drift paused';
+    el.latlon.title = sim.positionUncertain ? 'Position reconstructed through ' + new Date(positionTime).toISOString() + '; awaiting wind history' : '';
+    el.drift.textContent = sim.positionUncertain ? 'position uncertain · awaiting wind history' : sim.flightAvailable ? sim.drift.toFixed(0)+' km/h' : 'wind unavailable · drift paused';
 
     const scored = CROPS[SCORE_CROP];
     const scyc = phaseAt(tracks[SCORE_CROP], st.missionDay) || { idx: -2 };
@@ -2013,7 +2054,11 @@
     const stallDay = tracks[SCORE_CROP].stall;
     const doomed = stallDay !== null;
     const ok = inBand && marg > 3 && sim.fuel > 0.2 && !doomed && Number.isFinite(st.dli);
-    el.status.textContent = !Number.isFinite(st.temp) ? 'weather unavailable'
+    const unavailable = weather === openMeteoWeather && (!Number.isFinite(st.temp) || !sim.flightAvailable || sim.positionUncertain);
+    el.status.disabled = !unavailable || openMeteoWeather.pending;
+    el.status.title = unavailable ? 'Fetch weather again without resetting this tab' : '';
+    el.status.textContent = unavailable
+      ? (openMeteoWeather.pending ? 'retrying weather…' : 'weather unavailable · retry')
       : !doomed ? (ok ? 'nominal' : 'attention')
       : stallDay <= st.missionDay ? 'stalled'
       : 'stall in ' + Math.round(stallDay - st.missionDay) + ' d';
@@ -2052,6 +2097,8 @@
     sim.lat = lat;
     sim.lon = ((lon + 180) % 360 + 360) % 360 - 180;
     positionTime = Date.now();
+    flightLevels = [{ time: positionTime, level: pressureLevel }];
+    sim.positionUncertain = false;
     fixNote = '';
     positionTrail = [];
     recordPosition(positionTime);

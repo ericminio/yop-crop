@@ -7,11 +7,13 @@ function positionPanel() {
   run(`
     const strokes = [];
     let path = [];
+    let dash = [];
     const context = new Proxy({
+      setLineDash(value) { dash = value.slice(); },
       beginPath() { path = []; },
       moveTo(x, y) { path.push(['move', x, y]); },
       lineTo(x, y) { path.push(['line', x, y]); },
-      stroke() { strokes.push({ color: this.strokeStyle, width: this.lineWidth, path: path.slice() }); }
+      stroke() { strokes.push({ color: this.strokeStyle, width: this.lineWidth, dash: dash.slice(), cap: this.lineCap, path: path.slice() }); }
     }, { get: (target, key) => key in target ? target[key] : () => {} });
     const element = {
       getContext: () => context,
@@ -76,4 +78,21 @@ test('date-line crossing draws short continuous trail segments on either side of
   }
   assert.ok(points.some(p => p[1] < 60));
   assert.ok(points.some(p => p[1] > 340));
+});
+
+
+test('uncertain trail is dotted and returns to solid after recovery without affecting other strokes', () => {
+  const run = positionPanel();
+  run(`advancePosition(${when}); advancePosition(${when + 60000})`);
+  for (const uncertain of [false, true, false]) {
+    run(`sim.positionUncertain = ${uncertain}`);
+    trail(run);
+    const stroke = JSON.parse(run("JSON.stringify(strokes.find(s => s.color === '#ffc861' && s.width === 2))"));
+    assert.ok(stroke.path.length > 0);
+    assert.deepEqual(stroke.dash, uncertain ? [1, 5] : []);
+    if (uncertain) assert.equal(stroke.cap, 'round');
+    const crosshair = JSON.parse(run("JSON.stringify(strokes.find(s => s.color === 'rgba(255,200,97,0.30)'))"));
+    assert.deepEqual(crosshair.dash, []);
+    assert.notEqual(crosshair.cap, 'round');
+  }
 });

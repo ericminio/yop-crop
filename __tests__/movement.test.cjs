@@ -11,6 +11,10 @@ test('surface drift south of Hawaii catches up using forecast wind along the ent
   forecast(fixture, 27, 62);
   fixture('hourly.wind_speed_10m = [27, 27]; hourly.wind_direction_10m = [62, 62]');
   const row = JSON.parse(fixture("JSON.stringify(openMeteoWeather.cache.get('0.00,0.00'))"));
+  row.hourly.time = Array.from({length: 9}, (_, i) => when / 1000 + i * 3600);
+  for (const field of Object.keys(row.hourly)) {
+    if (field !== 'time') row.hourly[field] = Array(9).fill(row.hourly[field][0]);
+  }
   let requests = 0;
   const run = app('open-meteo', async () => {
     requests++;
@@ -57,6 +61,10 @@ test('overnight 1000 hPa movement retains elapsed time while fetching wind along
     hourly.geopotential_height_1000hPa = [100, 100];
   `);
   const row = JSON.parse(fixture("JSON.stringify(openMeteoWeather.cache.get('0.00,0.00'))"));
+  row.hourly.time = Array.from({length: 9}, (_, i) => when / 1000 + i * 3600);
+  for (const field of Object.keys(row.hourly)) {
+    if (field !== 'time') row.hourly[field] = Array(9).fill(row.hourly[field][0]);
+  }
   let requests = 0;
   const run = app('open-meteo', async () => {
     requests++;

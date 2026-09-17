@@ -6,10 +6,11 @@ const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const when = Date.UTC(2026, 8, 14, 12);
 
-function app(provider = 'simulated', fetch = async () => { throw Error('offline'); }) {
+function app(provider = 'simulated', fetch = async () => { throw Error('offline'); }, globals = {}) {
   const context = vm.createContext({
     URLSearchParams, location: { search: '?weather=' + provider }, fetch,
-    Date: class extends Date { static now() { return when; } }
+    Date: class extends Date { static now() { return when; } },
+    AbortController, setTimeout, clearTimeout, ...globals
   });
   vm.runInContext(script.slice(script.indexOf("  'use strict';"),
     script.indexOf('  function dayMs(')), context);
@@ -25,6 +26,7 @@ function forecast(run, speed = 24, direction = 270) {
     const daily = { time: [${when / 1000 - 43200}] };
     for (const field of openMeteoWeather.daily) daily[field] = [20];
     openMeteoWeather.cache.set('0.00,0.00', { hourly, daily });
+    openMeteoWeather.fetchedAt.set('0.00,0.00', Date.now());
   `);
 }
 
