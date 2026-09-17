@@ -18,7 +18,8 @@ pressure-level flight wind use the same reader and validation; the selected
 level determines the forecast fields, and pressure levels also require altitude.
 
 Cached forecasts refresh after 15 minutes, even when the platform is stationary.
-The last usable forecast remains available during refresh. Failed requests retry
+Cached crop conditions remain available during refresh, but wind expires after
+15 minutes and cannot advance the route until refreshed. Failed requests retry
 after one minute. These checks run when animation frames run, so returning to a
 suspended tab also triggers any overdue refresh.
 
@@ -42,13 +43,31 @@ metres above sea level (ASL), which varies with place and time. Changing levels
 finishes elapsed movement at the previous level, then switches wind without
 changing horizontal position. Missing or invalid selected-level wind or height
 pauses drift and displays unavailable data, rather than substituting surface wind.
-Cached data remains usable during refresh under the existing cache policy.
-When drift reaches a location without a cached forecast, elapsed movement time
-is retained while that location's forecast loads. Catch-up continues with the
-selected level's wind after loading, including after an overnight tab suspension.
-This also applies to surface wind: crossing into an uncached location waits for
-its forecast instead of moving with simulated wind.
-Changing levels or manually relocating starts a new movement interval.
+The last reconstructed position and its time form a checkpoint. Missing, invalid,
+or expired wind holds that checkpoint and retains all elapsed movement time.
+The header displays “position uncertain · awaiting wind history”; the coordinates'
+tooltip gives the checkpoint time. The amber trail becomes dotted while the
+position is uncertain and returns to solid once catch-up completes. It still ends
+at the last reconstructed position, with no guessed extension.
+The retry button also works when current wind
+is available but the route still has a historical gap.
+
+Recovery reconstructs movement from the checkpoint with fresh weather for each
+location and historical hour along the route. Each frame processes at most 240
+one-minute steps. Missing hourly coverage stops reconstruction rather than using
+current wind or extending an old sample indefinitely. Incomplete route weather
+is retried at most once per minute automatically; the button can retry sooner.
+Flight-level changes during an outage are retained with their times, so each
+reconstructed interval uses the level selected then. Manual relocation explicitly
+starts a new route and clears its unresolved history.
+
+Positions remain weather-model estimates, not observed fixes. Freshness means
+fetched within 15 minutes, not a guarantee of wind accuracy. Completed intervals
+are not retroactively revised by later forecasts. If the needed historical wind
+cannot be retrieved (requests include at most 92 past days), the position remains
+uncertain instead of silently skipping the gap. No provisional movement is added
+while waiting for usable wind.
+
 
 Crop temperature, humidity and cloud cover also come from the selected level.
 VPD is derived from its temperature and relative humidity. Daily temperature
@@ -121,7 +140,7 @@ the session's starting position to FF1, retaining a point each minute plus its
 live position. Clicking to relocate clears the trail and starts it there.
 After a suspended tab resumes, elapsed time is integrated in
 steps using weather along the route, waiting for uncached route forecasts in
-Open-Meteo mode and pausing drift for unavailable wind samples. Reloading starts a new session;
+Open-Meteo mode and retaining elapsed time for unavailable wind samples. Reloading starts a new session;
 the flight path and selected level are not persisted.
 
 Run the weather and movement checks with `node --test __tests__/*.test.cjs`.

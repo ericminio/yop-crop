@@ -41,6 +41,7 @@ test('hung requests time out, retain cached wind, and allow an automatic retry',
     clearTimeout() {}
   });
   forecast(run, 12, 270);
+  run(`openMeteoWeather.fetchedAt.set('0.00,0.00', ${when - 15 * 60000})`);
   run('openMeteoWeather.prime([{lat: 0, lon: 0}], 2)');
   assert.equal(typeof timeout, 'function', 'weather requests need a timeout');
   run('openMeteoWeather.prime([{lat: 0, lon: 0}], 2, true)');
@@ -50,7 +51,8 @@ test('hung requests time out, retain cached wind, and allow an automatic retry',
   await settle();
   assert.equal(signal.aborted, true);
   assert.equal(run('openMeteoWeather.pending'), false);
-  assert.equal(run('flightAt(0, 0, Date.now()).speed'), 12);
+  assert.equal(run("openMeteoWeather.cache.get('0.00,0.00').hourly.wind_speed_10m[0]"), 12);
+  assert.equal(run('flightAt(0, 0, Date.now())'), null);
   run(`Date.now = () => ${when + 74999}; openMeteoWeather.prime([{lat: 0, lon: 0}], 2)`);
   assert.equal(requests, 1);
   const stale = finishOld;
@@ -59,7 +61,8 @@ test('hung requests time out, retain cached wind, and allow an automatic retry',
   stale({ok: true, json: async () => ({hourly: {time: [1]}, daily: {time: [1]}})});
   await settle();
   assert.equal(run('openMeteoWeather.pending'), true);
-  assert.equal(run('flightAt(0, 0, Date.now()).speed'), 12);
+  assert.equal(run("openMeteoWeather.cache.get('0.00,0.00').hourly.wind_speed_10m[0]"), 12);
+  assert.equal(run('flightAt(0, 0, Date.now())'), null);
   timeout();
   await settle();
 });
@@ -88,6 +91,10 @@ test('weather status is a native retry button for unavailable crop weather or wi
   update();
   assert.equal(run('el.status.disabled'), true);
   assert.equal(run('el.status.textContent'), 'nominal');
+  run('sim.positionUncertain = true');
+  update();
+  assert.equal(run('el.status.disabled'), false);
+  assert.match(run('el.status.textContent'), /retry/i);
 });
 
 test('clicking the status retries the current location and restores forecast wind', async () => {

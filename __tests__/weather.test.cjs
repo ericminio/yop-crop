@@ -30,7 +30,10 @@ test('refreshes an expired forecast while the farm remains stationary', async ()
   assert.equal(run('sim.lon'), 0);
   await prime();
   assert.equal(requests.length, 2);
-  assert.equal(requests[0].search, requests[1].search);
+  for (const field of ['latitude', 'longitude', 'hourly', 'daily']) {
+    assert.equal(requests[0].searchParams.get(field), requests[1].searchParams.get(field));
+  }
+  assert.ok(Number(requests[1].searchParams.get('past_days')) >= 2);
   run('readState()');
   assert.equal(run('sim.drift'), 20);
 });
@@ -86,7 +89,7 @@ test('missing pressure-level crop data never falls back to surface weather', () 
   assert.equal(run('Number.isNaN(readState().temp)'), true);
 });
 
-test('failed refresh keeps cached wind and waits a minute before retrying', async () => {
+test('failed refresh retains the cache but stops using expired wind and waits a minute before retrying', async () => {
   for (const failure of ['network', 'http', 'invalid body']) {
     let requests = 0;
     const run = app('open-meteo', async () => {
@@ -95,20 +98,22 @@ test('failed refresh keeps cached wind and waits a minute before retrying', asyn
       return { ok: failure !== 'http', json: async () => ({ error: true }) };
     });
     forecast(run, 12, 270);
+    run(`openMeteoWeather.fetchedAt.set('0.00,0.00', ${when - 15 * 60000})`);
     const prime = async () => {
       run('openMeteoWeather.prime([{lat: 0, lon: 0}], 2)');
       await new Promise(resolve => setImmediate(resolve));
     };
     await prime();
     run('readState()');
-    assert.equal(run('sim.drift'), 12);
+    assert.equal(run('sim.drift'), 0);
     run(`Date.now = () => ${when + 59999}`);
     await prime();
     assert.equal(requests, 1);
     run(`Date.now = () => ${when + 60000}`);
     await prime();
     assert.equal(requests, 2);
-    assert.equal(run('flightAt(0, 0, Date.now()).speed'), 12);
+    assert.equal(run('flightAt(0, 0, Date.now())'), null);
+    assert.equal(run("openMeteoWeather.cache.get('0.00,0.00').hourly.wind_speed_10m[0]"), 12);
   }
 });
 

@@ -26,6 +26,7 @@ function forecast(run, speed = 24, direction = 270) {
     const daily = { time: [${when / 1000 - 43200}] };
     for (const field of openMeteoWeather.daily) daily[field] = [20];
     openMeteoWeather.cache.set('0.00,0.00', { hourly, daily });
+    openMeteoWeather.fetchedAt.set('0.00,0.00', Date.now());
   `);
 }
 
