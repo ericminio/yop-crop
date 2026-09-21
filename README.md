@@ -1,5 +1,7 @@
 # yop-crop
 
+[Play the live game](https://ericminio.github.io/yop-crop)
+
 A flying farm: a donut-shaped platform lifted by hot air balloons, carrying enough
 growing area to feed a family of three for a year. It moves to follow the weather
 its crops need.
