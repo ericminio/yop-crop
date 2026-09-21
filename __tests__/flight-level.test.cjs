@@ -6,8 +6,8 @@ const { app, script } = require('./app-helper.cjs');
 
 const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 
-function control(provider = 'open-meteo') {
-  const run = app(provider);
+function control(provider = 'open-meteo', globals = {}) {
+  const run = app(provider, undefined, globals);
   run(`
     const listeners = {};
     const attributes = {};
@@ -52,4 +52,19 @@ test('slider selects each flight level from surface upward and updates its reada
 test('flight slider remains disabled without pressure-level forecasts', () => {
   assert.equal(control('simulated')('slider.disabled'), true);
   assert.equal(control()('slider.disabled'), false);
+});
+
+test('opening the page without a weather parameter enables forecast flight levels', () => {
+  const run = control(undefined, { location: { search: '' } });
+  assert.equal(run('weather === openMeteoWeather'), true);
+  assert.equal(run('slider.disabled'), false);
+  run("slider.value = '6'; listeners.input()");
+  assert.equal(run('pressureLevel'), 850);
+  assert.equal(run("elements['flight-level-value'].textContent"), '850 hPa');
+});
+
+test('an unrecognized weather parameter uses forecast flight levels', () => {
+  const run = control('unknown');
+  assert.equal(run('weather === openMeteoWeather'), true);
+  assert.equal(run('slider.disabled'), false);
 });

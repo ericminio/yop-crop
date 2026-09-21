@@ -82,6 +82,7 @@ test('manual relocation clears the unresolved route and level history', () => {
     Date.now = () => ${when + 60000}; selectPressureLevel(850);
     let fixNote, mapDirty;
     const document = {getElementById: () => null}; function syncMapCtl() {}`);
+  run(script.slice(script.indexOf('  function dayMs('), script.indexOf('  const canvas =')));
   run(script.slice(script.indexOf('  function setPosition('), script.indexOf('  function weatherNote(')));
   run("setPosition(0, 0, 'map'); readState()");
   assert.equal(run('positionTime'), when + 60000);

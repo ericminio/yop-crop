@@ -27,6 +27,7 @@ function positionPanel() {
     weather = { at: () => ({ wind_speed_10m: 60, wind_direction_10m: 270 }) };
   `);
   run(script.slice(script.indexOf('  const mapc ='), script.indexOf("  mapc.addEventListener('mousedown'")));
+  run(script.slice(script.indexOf('  function dayMs('), script.indexOf('  const canvas =')));
   run(script.slice(script.indexOf('  function setPosition('), script.indexOf('  function askPosition(')));
   return run;
 }

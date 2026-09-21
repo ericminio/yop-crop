@@ -209,6 +209,7 @@ test('manual relocation starts a fresh movement interval', () => {
     const document = { getElementById: () => null };
     function syncMapCtl() {}
   `);
+  run(script.slice(script.indexOf('  function dayMs('), script.indexOf('  const canvas =')));
   run(script.slice(script.indexOf('  function setPosition('), script.indexOf('  function weatherNote(')));
   run(`advancePosition(${when - 3600000}); setPosition(0, 20, 'map'); advancePosition(${when + 60000})`);
   assert.ok(Math.abs(run('sim.lon') - 20.00899322) < 0.000001);
