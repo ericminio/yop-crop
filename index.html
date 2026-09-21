@@ -372,7 +372,7 @@
   const TOTAL_AREA = CROPS.reduce(function (s, c) { return s + c.area; }, 0);
   const ROCK_DARK = [70,58,48], BALLOON_COLOR = [226,196,74];
 
-  const LAUNCH = Date.UTC(2026, 8, 10, 6, 0);
+  let missionStartedAt = Date.now();
   const FORECAST_DAYS = 16;
   const PRESSURE_LEVELS = [1000, 975, 950, 925, 900, 850, 800, 700, 600,
                          500, 400, 300, 250, 200, 150, 100, 70, 50, 30];
@@ -430,7 +430,7 @@
            : when <= now + FORECAST_DAYS * 86400000 ? 'forecast' : 'climatology';
     },
     at: function (latDeg, lonDeg, when) {
-      const missionDay = (when - LAUNCH) / 86400000;
+      const missionDay = (when - missionStartedAt) / 86400000;
       const solarMs = when + lonDeg / 15 * 3600000;
       const doy = doyOf(solarMs);
       const s = solar(latDeg, doy, 12);
@@ -593,7 +593,7 @@
 
   const PROVIDERS = { simulated: simulatedWeather, 'open-meteo': openMeteoWeather };
   let weather = PROVIDERS[new URLSearchParams(location.search).get('weather')] ||
-                simulatedWeather;
+                openMeteoWeather;
 
   function scoringPoints() {
     return CANDIDATES.map(function (cd) {
@@ -791,7 +791,7 @@
     const d = new Date(now);
     const utcHours = d.getUTCHours() + d.getUTCMinutes()/60 + d.getUTCSeconds()/3600;
     const doy = doyOf(now + sim.lon / 15 * 3600000);
-    const missionDay = (now - LAUNCH) / 86400000;
+    const missionDay = (now - missionStartedAt) / 86400000;
     const solarHours = localSolar(utcHours, sim.lon);
     const s = solar(sim.lat, doy, solarHours);
     const wx = weather.at(sim.lat, sim.lon, now);
@@ -810,7 +810,7 @@
              dli: wx.shortwave_radiation_sum * PAR_PER_MJ };
   }
 
-  function dayMs(missionDay) { return LAUNCH + missionDay * 86400000; }
+  function dayMs(missionDay) { return missionStartedAt + missionDay * 86400000; }
 
   const STALL_RATE = 0.5;
 
@@ -1171,7 +1171,7 @@
       tctx.strokeStyle = 'rgba(111,224,255,0.10)';
       tctx.beginPath(); tctx.moveTo(x,padT-6); tctx.lineTo(x,H-padB+3); tctx.stroke();
       tctx.fillStyle='rgba(122,163,184,0.75)'; tctx.textAlign='center';
-      tctx.fillText('D'+d, x, H-padB+6);
+      tctx.fillText('D'+(d + 1), x, H-padB+6);
     }
 
     for (let i = 0; i < CROPS.length; i++) {
@@ -1230,7 +1230,7 @@
         if (mx > padL - 4 && mx < padL + plotW) {
           drawTimelineMarker(mx, by - 5, by + bh + 5, {
             color: '#6fe0ff', width: 1.2,
-            label: { text: 'sown D' + Math.round(track.sown), y: by - 4 }
+            label: { text: 'sown D' + (Math.round(track.sown) + 1), y: by - 4 }
           });
         }
       }
@@ -1253,7 +1253,7 @@
         if (sx > padL && sx < padL + plotW) {
           drawTimelineMarker(sx, by - 4, by + bh + 4, {
             color: '#ff7a6e', width: 1.5,
-            label: { text: 'stall D' + Math.round(track.stall), y: by - 3 }
+            label: { text: 'stall D' + (Math.round(track.stall) + 1), y: by - 3 }
           });
         }
       }
@@ -1736,7 +1736,7 @@
 
   el.status.addEventListener('click', function () {
     if (el.status.disabled || weather !== openMeteoWeather) return;
-    weather.prime([{ lat: sim.lat, lon: sim.lon }], (Date.now() - Math.min(LAUNCH, positionTime ?? Date.now())) / 86400000 + 2, true);
+    weather.prime([{ lat: sim.lat, lon: sim.lon }], (Date.now() - Math.min(missionStartedAt, positionTime ?? Date.now())) / 86400000 + 2, true);
     el.status.disabled = true;
     el.status.textContent = 'retrying weather…';
   });
@@ -1907,7 +1907,7 @@
     const d = st.d;
     el.clock.textContent = pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes())+':'+
                            pad2(d.getUTCSeconds())+' UTC';
-    el.mday.textContent = Math.floor(st.missionDay);
+    el.mday.textContent = Math.floor(st.missionDay) + 1;
     el.datestr.textContent = d.getUTCDate()+' '+MONTHS[d.getUTCMonth()]+' '+d.getUTCFullYear();
     el.latlon.textContent = Math.abs(sim.lat).toFixed(2)+'°'+(sim.lat>=0?'N':'S')+'  '+
                             Math.abs(sim.lon).toFixed(2)+'°'+(sim.lon>=0?'E':'W');
@@ -2042,8 +2042,8 @@
         (cd.dist ? cd.dist+' km · '+o.eta.toFixed(0)+' h  ·  ' : '')+
         formatWeather(ax.nightMin, 0)+'/'+formatWeather(ax.dayMax, 0)+' °C  ·  '+
         formatWeather(ax.dli, 0)+' mol  ·  '+
-        (o.unknownFrom !== null && o.unknownFrom !== undefined ? 'forecast ends D' + Math.round(o.unknownFrom) : o.usable === Infinity
-          ? (o.harvest === null ? 'no stall' : 'harvest D' + Math.round(o.harvest))
+        (o.unknownFrom !== null && o.unknownFrom !== undefined ? 'forecast ends D' + (Math.round(o.unknownFrom) + 1) : o.usable === Infinity
+          ? (o.harvest === null ? 'no stall' : 'harvest D' + (Math.round(o.harvest) + 1))
           : Math.round(o.usable) + ' d usable');
       candEls[i].dt.style.color = o.usable < scored.days ? 'var(--red)' : '';
     }
@@ -2097,6 +2097,12 @@
     sim.lat = lat;
     sim.lon = ((lon + 180) % 360 + 360) % 360 - 180;
     positionTime = Date.now();
+    missionStartedAt = positionTime;
+    sown.fill(null);
+    scrub = null;
+    nowDay = 0;
+    devel.key = null;
+    outlook.key = null;
     flightLevels = [{ time: positionTime, level: pressureLevel }];
     sim.positionUncertain = false;
     fixNote = '';

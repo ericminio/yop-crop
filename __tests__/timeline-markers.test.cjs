@@ -45,8 +45,8 @@ test('timeline preserves distinct sown, stalled, forecast and scrubbed marker ap
   }
   const labels = JSON.parse(run("JSON.stringify(labels.filter(label => /^(sown D|stall D|projected)/.test(label.text)))"));
   assert.deepEqual(labels, [
-    { text: 'sown D20', x: x(20) + 3, y: 22, color: '#6fe0ff', align: 'left', baseline: 'bottom', font: '8.5px ui-monospace, Menlo, monospace' },
-    { text: 'stall D30', x: x(30) + 3, y: 23, color: '#ff7a6e', align: 'left', baseline: 'bottom', font: '8.5px ui-monospace, Menlo, monospace' },
+    { text: 'sown D21', x: x(20) + 3, y: 22, color: '#6fe0ff', align: 'left', baseline: 'bottom', font: '8.5px ui-monospace, Menlo, monospace' },
+    { text: 'stall D31', x: x(30) + 3, y: 23, color: '#ff7a6e', align: 'left', baseline: 'bottom', font: '8.5px ui-monospace, Menlo, monospace' },
     { text: 'projected', x: x(26) + 3, y: 2, color: 'rgba(122,163,184,0.85)', align: 'left', baseline: 'top', font: '8.5px ui-monospace, Menlo, monospace' }
   ]);
 });
@@ -58,4 +58,10 @@ test('live timeline has a solid amber marker and omits offscreen crop markers', 
   assert.equal(run("strokes.some(stroke => stroke.color === 'rgba(255,200,97,0.30)')"), false);
   assert.deepEqual(JSON.parse(run("JSON.stringify(strokes.find(stroke => stroke.color === '#ffc861'))")),
     { path: [[x(10), 6], [x(10), 138]], color: '#ffc861', width: 1.8, dash: [] });
+});
+
+test('timeline starts at day 1 to match the mission clock', () => {
+  const run = timeline();
+  run('drawTimeline({ missionDay: 0 }, 0, tracks)');
+  assert.equal(run("labels.find(label => /^D[0-9]/.test(label.text)).text"), 'D1');
 });

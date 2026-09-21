@@ -1,5 +1,7 @@
 # yop-crop
 
+[Play the live game](https://ericminio.github.io/yop-crop)
+
 A flying farm: a donut-shaped platform lifted by hot air balloons, carrying enough
 growing area to feed a family of three for a year. It moves to follow the weather
 its crops need.
@@ -8,9 +10,11 @@ its crops need.
 
 ## Weather adapters
 
-The default simulated adapter generates weather, including wind. Open
-`index.html?weather=open-meteo` to use Open-Meteo forecasts, with simulated
-crop conditions as the fallback when surface forecast coverage is unavailable.
+Open-Meteo forecasts are the default, so the flight level selector is enabled
+without a URL parameter. Open `index.html?weather=simulated` to use generated
+weather, including wind; flight level selection is disabled in simulated mode.
+Open-Meteo uses simulated crop conditions as the fallback when surface forecast
+coverage is unavailable.
 Drift and the heading display only use forecast wind in Open-Meteo mode;
 missing or invalid wind pauses drift and hides the map's direction arrow.
 The Open-Meteo weather adapter returns crop conditions only. Surface and
@@ -133,7 +137,11 @@ The pressure levels and variables are documented in the
 [Open-Meteo forecast API](https://open-meteo.com/en/docs#pressure-level-variables).
 
 Position advances in real time with the selected adapter's wind, starting from
-the initial position. Selecting a new position resets the movement clock there.
+the initial position. Each page load starts a new mission on day 1. Selecting a
+new position restarts the mission on day 1, clears sowing dates and the timeline
+selection, and resets the movement clock there. Wind drift does not restart the
+mission. Mission days advance every 24 elapsed hours; calendar dates and weather
+continue to use the current real time.
 The map and coordinates follow the drift; scrubbing the crop timeline does not
 move the platform. An amber trail in the Position panel follows the route from
 the session's starting position to FF1, retaining a point each minute plus its
