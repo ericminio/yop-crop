@@ -671,7 +671,7 @@
       if (!row || !this.covers(row, when)) {
         if (replayClock) return Object.fromEntries(this.hourly.concat(this.daily).map(function (field) { return [field, NaN]; }));
         const { wind_speed_10m, wind_direction_10m, ...cropWeather } = simulatedWeather.at(lat, lon, when);
-        return cropWeather;
+        return { ...cropWeather, estimated: true, thermal_estimated: true };
       }
       const sec = when / 1000;
       const h = nearestIndex(row.hourly.time, sec);
@@ -776,11 +776,12 @@
     const fields = ['temperature_2m', 'temperature_2m_min', 'temperature_2m_max',
       'relative_humidity_2m', 'vapour_pressure_deficit', 'cloud_cover', 'daylight_duration',
       'shortwave_radiation_sum', 'et0_fao_evapotranspiration'];
-    const result = { ...raw, estimated: !fresh };
+    const result = { ...raw, estimated: !fresh, thermal_estimated: !fresh };
     for (const field of fields) {
       if (covered && Number.isFinite(raw[field])) continue;
       result[field] = known ? known.wx[field] + estimate[field] - known.baseline[field] : estimate[field];
       result.estimated = true;
+      if (field === 'temperature_2m_min' || field === 'temperature_2m_max') result.thermal_estimated = true;
     }
     result.relative_humidity_2m = clamp(result.relative_humidity_2m, 0, 100);
     result.cloud_cover = clamp(result.cloud_cover, 0, 100);
@@ -1055,11 +1056,16 @@
 
   const STALL_RATE = 0.5;
 
-  function buildTrack(c, sowDay, lat, lon, fromDay, missionDay, endDay) {
+  function buildTrack(c, sowDay, lat, lon, fromDay, missionDay, endDay, estimateRate = null) {
     const first = Math.max(0, Math.floor(fromDay)), rate = [];
+    let estimatedFrom = null;
     for (let d = first; d < endDay; d++) {
       const wx = conditionsAt(lat, lon, dayMs(d));
       rate[d] = Math.max(0, (wx.temperature_2m_max + wx.temperature_2m_min) / 2 - c.tBase);
+      if (estimateRate && (wx.thermal_estimated || !Number.isFinite(rate[d]))) {
+        rate[d] = estimateRate(d);
+        if (estimatedFrom === null) estimatedFrom = d;
+      }
     }
 
     const watch = Math.max(first, Math.floor(sowDay === null ? missionDay : sowDay));
@@ -1091,9 +1097,10 @@
 
     let last = watch - 1;
     for (let d = watch; d < endDay; d++) if (rate[d] >= STALL_RATE) last = d;
-    const stall = unknownFrom === null && last + 1 < endDay ? Math.max(watch, last + 1) : null;
+    const stall = unknownFrom === null && estimatedFrom === null && last + 1 < endDay ? Math.max(watch, last + 1) : null;
 
-    return { segs: segs, stall: stall, unknownFrom: unknownFrom, rate: rate, sown: sowDay, from: watch };
+    return { segs: segs, stall: stall, unknownFrom: unknownFrom, estimatedFrom: estimatedFrom,
+             rate: rate, sown: sowDay, from: watch };
   }
 
   const devel = { key: null, tracks: null };
@@ -1129,11 +1136,18 @@
     const primed = weather.revision || 0;
     const key = [weather.name, primed, pressureLevel, lat.toFixed(2), lon.toFixed(2),
                  Math.floor(missionDay), Math.floor(fromDay), Math.ceil(endDay),
-                 sown.join(',')].join('|');
+                 !!conditionsAt(lat, lon, gameNow()).estimated, sown.join(',')].join('|');
     if (devel.key !== key) {
+      const previous = devel.key && devel.level === pressureLevel ? devel.tracks : null;
       devel.key = key;
+      devel.level = pressureLevel;
       devel.tracks = CROPS.map(function (c, i) {
-        return buildTrack(c, sown[i], lat, lon, fromDay, missionDay, endDay);
+        return buildTrack(c, sown[i], lat, lon, fromDay, missionDay, endDay, function (day) {
+          const retained = previous?.[i].rate[day];
+          if (Number.isFinite(retained)) return retained;
+          const wx = generatedConditions(lat, lon, dayMs(day)).wx;
+          return Math.max(0, (wx.temperature_2m_max + wx.temperature_2m_min) / 2 - c.tBase);
+        });
       });
     }
     return devel.tracks;
@@ -1483,6 +1497,18 @@
         tctx.fillStyle = 'rgba(122,163,184,0.8)';
         tctx.font = '8.5px ui-monospace, Menlo, monospace';
         tctx.fillText('weather unavailable', ux + 4, by + bh/2);
+      }
+      if (Number.isFinite(track.estimatedFrom) && track.estimatedFrom < day0 + span) {
+        const ex = Math.max(padL, X(track.estimatedFrom));
+        tctx.save();
+        tctx.strokeStyle = 'rgba(255,200,97,0.65)';
+        tctx.setLineDash([3, 3]);
+        tctx.strokeRect(ex, by, Math.max(0, padL + plotW - ex), bh);
+        tctx.fillStyle = '#ffc861';
+        tctx.font = '8.5px ui-monospace, Menlo, monospace';
+        tctx.textAlign = 'right'; tctx.textBaseline = 'top';
+        tctx.fillText(st.wx?.estimated ? 'weather delayed · estimated cycles' : 'estimated cycles', padL + plotW - 4, by + bh + 2);
+        tctx.restore();
       }
       if (track.stall !== null && track.stall < day0 + span) {
         const sx = Math.max(padL, X(track.stall));
@@ -2238,10 +2264,12 @@
       }
       E.root.classList.remove('idle');
       const n = c.need[cy.idx], a = axesOf(st.wx, c);
-      E.note.textContent = n.note;
+      const estimatedCycle = Number.isFinite(tracks[i].estimatedFrom) && markDay >= tracks[i].estimatedFrom;
+      E.note.textContent = n.note + (estimatedCycle ? ' · estimated cycle' : '');
 
       const ref = SPLIT[cy.idx] * c.days, proj = cy.phaseDays;
-      const gS = cy.open && tracks[i].unknownFrom !== null ? ['forecast ends','']
+      const gS = estimatedCycle ? ['estimated','warn']
+               : cy.open && tracks[i].unknownFrom !== null ? ['forecast ends','']
                : cy.open ? ['stalled','bad']
                : proj <= ref*1.1 ? ['ok','ok']
                : proj <= ref*1.5 ? ['slow','warn'] : ['stalled','bad'];

@@ -202,6 +202,14 @@ steps using weather along the route. Open-Meteo reconstruction retains elapsed
 time for unavailable wind while the displayed position continues provisionally. Reloading starts a new session;
 the flight path and selected level are not persisted.
 
+Crop cycles remain visible through weather outages. Missing daily growth rates
+reuse the preceding outlook at the same flight level; days without prior data
+use the altitude-adjusted seasonal model. Amber dashed outlines mark provisional
+cycles, with a weather-delay label during an outage. Fresh weather recalculates
+the cycles automatically. These estimates also extend the timeline beyond the
+available forecast, but do not fill missing relocation-candidate forecasts.
+Changing level or resetting the mission discards the previous crop estimates.
+
 Run the weather and movement checks with `node --test __tests__/*.test.cjs`.
 With the local server running, open `/__tests__/header-layout.html` to run browser
 geometry checks for loading, available, estimated and recovering weather at five

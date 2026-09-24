@@ -71,11 +71,12 @@ test('crop thermal and moisture conditions follow the selected pressure level', 
   run(script.slice(script.indexOf('  function dayMs('), script.indexOf('  const canvas =')));
   run('sown[0] = 0');
   const coolRate = run('tracksFor(0, 0, 0, 0, 2)[0].rate[0]');
-  assert.equal(run('tracksFor(0, 0, 0, 0, 2)[0].unknownFrom'), 1);
+  assert.equal(run('tracksFor(0, 0, 0, 0, 2)[0].unknownFrom'), null);
+  assert.equal(run('tracksFor(0, 0, 0, 0, 2)[0].estimatedFrom'), 1);
   assert.equal(run('tracksFor(0, 0, 0, 0, 2)[0].stall'), null);
   run('selectPressureLevel(900)');
   assert.equal(run('tracksFor(0, 0, 0, 0, 2)[0].rate[0]') - coolRate, 10);
-  assert.equal(run('phaseAt(tracksFor(0, 0, 0, 0, 2)[0], 1).phase'), 'weather unavailable');
+  assert.notEqual(run('phaseAt(tracksFor(0, 0, 0, 0, 2)[0], 1).phase'), 'weather unavailable');
 });
 
 test('missing pressure-level crop data never falls back to surface weather', () => {
