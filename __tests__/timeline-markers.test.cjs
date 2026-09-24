@@ -38,7 +38,7 @@ test('timeline preserves distinct sown, stalled, forecast and scrubbed marker ap
     { path: [[x(20), 21], [x(20), 51]], color: '#6fe0ff', width: 1.2, dash: [] },
     { path: [[x(30), 22], [x(30), 50]], color: '#ff7a6e', width: 1.5, dash: [] },
     { path: [[x(26), 10], [x(26), 139]], color: 'rgba(111,224,255,0.35)', width: 1, dash: [2, 3] },
-    { path: [[x(10), 8], [x(10), 138]], color: 'rgba(255,200,97,0.30)', width: 1, dash: [3, 3] },
+    { path: [[x(10), 8], [x(10), 138]], color: '#ffc861', width: 1.8, dash: [] },
     { path: [[x(15), 6], [x(15), 138]], color: '#6fe0ff', width: 1.8, dash: [] }
   ]) {
     assert.deepEqual(strokes.find(stroke => stroke.color === expected.color && stroke.width === expected.width), expected);
