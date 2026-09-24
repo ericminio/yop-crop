@@ -993,9 +993,14 @@
   }
 
   function flightAt(lat, lon, when, level = pressureLevel, allowStale = false) {
-    if (level === null && weather !== openMeteoWeather) {
+    if (weather !== openMeteoWeather && (level === null || weather === simulatedWeather)) {
       const wx = weather.at(lat, lon, when);
-      return { speed: wx.wind_speed_10m, direction: wx.wind_direction_10m, altitude: null };
+      const index = level === null ? 0 : PRESSURE_LEVELS.indexOf(level) + 1;
+      return {
+        speed: wx.wind_speed_10m + index * 3,
+        direction: (wx.wind_direction_10m + index * 37) % 360,
+        altitude: level === null ? null : 44330 * (1 - Math.pow(level / 1013.25, 0.1903))
+      };
     }
     const key = openMeteoWeather.key(lat, lon, when);
     const row = weather === openMeteoWeather && openMeteoWeather.cache.get(key);
@@ -2737,8 +2742,8 @@
 
   const levelControl = document.getElementById('pressure-level');
   levelControl.max = PRESSURE_LEVELS.length;
-  levelControl.disabled = weather !== openMeteoWeather;
-  levelControl.title = levelControl.disabled ? 'Flight levels require ?weather=open-meteo' : 'Wind and crop weather at this pressure level; altitude above sea level';
+  levelControl.disabled = false;
+  levelControl.title = weather === simulatedWeather ? 'Simulated winds at each flight level; altitude above sea level' : 'Wind and crop weather at this pressure level; altitude above sea level';
   function syncFlightLevel() {
     const label = pressureLevel === null ? 'surface' : pressureLevel + ' hPa';
     const fraction = Number(levelControl.value) / PRESSURE_LEVELS.length;

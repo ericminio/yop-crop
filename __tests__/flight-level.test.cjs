@@ -51,9 +51,28 @@ test('slider selects each flight level from surface upward and updates its reada
   assert.equal(run('pressureLevel'), null);
 });
 
-test('flight slider remains disabled without pressure-level forecasts', () => {
-  assert.equal(control('simulated')('slider.disabled'), true);
+test('flight slider supports simulated and forecast winds', () => {
+  assert.equal(control('simulated')('slider.disabled'), false);
   assert.equal(control()('slider.disabled'), false);
+});
+
+test('simulated altitude winds populate every stop with varied directions and strengths without fetching', () => {
+  let requests = 0;
+  const run = app('simulated', () => { requests++; throw Error('unexpected request'); });
+  const markup = run(`flightWindMarkup(${when})`);
+  assert.doesNotMatch(markup, /wind unavailable/);
+  for (const side of ['left', 'right']) assert.ok(markup.includes(`data-side="${side}"`));
+  for (const length of [6, 10, 14]) assert.ok(markup.includes(`data-length="${length}"`));
+  run(`var winds = PRESSURE_LEVELS.map(level => flightAt(0, 0, ${when}, level))`);
+  assert.equal(run('winds.every(wind => wind && wind.speed > 0 && wind.direction >= 0 && wind.direction < 360 && wind.altitude > 0)'), true);
+  assert.equal(run('new Set(winds.map(wind => wind.direction)).size'), 19);
+  assert.equal(run(`JSON.stringify(flightAt(0, 0, ${when}, 850)) === JSON.stringify(flightAt(0, 0, ${when}, 850))`), true);
+  assert.notEqual(run(`flightAt(0, 0, ${when}, 850).direction`), run(`flightAt(0, 0, ${when + 86400000}, 850).direction`));
+  assert.equal(requests, 0);
+  const simulatedControl = control('simulated');
+  simulatedControl("slider.value = '6'; listeners.input()");
+  assert.equal(simulatedControl('pressureLevel'), 850);
+  assert.equal(simulatedControl('sim.flightAvailable'), true);
 });
 
 test('slider fill reaches the thumb from the bottom after dragging or choosing a suggested level', () => {

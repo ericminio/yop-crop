@@ -61,7 +61,10 @@ provisional weather and position; **Correcting route** indicates recovery.
 
 Open-Meteo forecasts are the default, so the flight level selector is enabled
 without a URL parameter. Open `index.html?weather=simulated` to use generated
-weather, including wind; flight level selection is disabled in simulated mode.
+weather, including winds at every flight level. The slider works in simulated
+mode, with stronger winds and changing directions across levels for previewing
+the arrows and drift without API calls. These winds are illustrative; simulated
+crop weather retains its existing behavior.
 Each flight-level slider stop shows an arrow pointing toward the wind-driven
 drift (north is up). Short, medium and long arrows indicate winds below 15,
 15–39 and at least 40 km/h. Hover an arrow for its level, bearing and speed;
