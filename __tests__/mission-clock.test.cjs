@@ -30,14 +30,51 @@ test('each page load starts on day 1 using the current calendar date', () => {
   }
 });
 
-test('wind drift advances the mission clock without resetting sowing dates', () => {
+test('mission day advances at local solar midnight while crop age stays elapsed', () => {
   const run = mission();
-  run(`readState(); sown[0] = 0; Date.now = () => ${when + 86400000 - 1}`);
+  run("setPosition(0, 15, 'map'); advancePosition = () => {}; sown[0] = 0");
+  run(`Date.now = () => ${when + 11 * 3600000 - 1}`);
   assert.equal(displayedDay(run), 1);
-  run(`Date.now = () => ${when + 86400000}`);
+  run(`Date.now = () => ${when + 11 * 3600000}`);
   assert.equal(displayedDay(run), 2);
-  assert.notEqual(run('sim.lon'), 0);
+  assert.equal(run('st.lst'), 0);
+  assert.equal(run('st.missionDay'), 11 / 24);
   assert.equal(run('sown[0]'), 0);
+  assert.equal(run('dayMs(1)'), when + 86400000);
+});
+
+test('longitude corrections cannot reverse or count the same solar midnight twice', () => {
+  const run = mission();
+  run(`advancePosition = () => {}; Date.now = () => ${when + 12 * 3600000 - 60000}`);
+  assert.equal(displayedDay(run), 1);
+  run('sim.lon = 1');
+  assert.equal(displayedDay(run), 2);
+  run('sim.lon = -1');
+  assert.equal(displayedDay(run), 2);
+  run('sim.lon = 1');
+  assert.equal(displayedDay(run), 2);
+  run(`Date.now = () => ${when + 36 * 3600000 - 60000}`);
+  assert.equal(displayedDay(run), 3);
+});
+
+test('crossing the antimeridian keeps the solar day continuous in both directions', () => {
+  for (const direction of [1, -1]) {
+    const run = mission(when - 12 * 3600000);
+    run(`setPosition(0, ${direction * 179}, 'map'); advancePosition = () => {}`);
+    assert.equal(displayedDay(run), 1);
+    run(`sim.lon = ${-direction * 179}`);
+    assert.equal(displayedDay(run), 1);
+    run(`Date.now = () => ${when + 12 * 3600000}`);
+    assert.equal(displayedDay(run), 2);
+  }
+});
+
+test('a mission starting at solar midnight begins on day 1 and survives multi-day gaps', () => {
+  const run = mission(when - 12 * 3600000);
+  run('advancePosition = () => {}');
+  assert.equal(displayedDay(run), 1);
+  run(`Date.now = () => ${when - 12 * 3600000 + 3 * 86400000}`);
+  assert.equal(displayedDay(run), 4);
 });
 
 test('manual relocation starts a fresh mission and discards the previous crop timeline', () => {

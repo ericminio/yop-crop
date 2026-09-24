@@ -6,6 +6,25 @@ const { app, forecast, script, when } = require('./app-helper.cjs');
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test('route recovery retries incomplete wind after 15 real seconds', async () => {
+  const fixture = app();
+  forecast(fixture);
+  const row = JSON.parse(fixture("JSON.stringify(openMeteoWeather.cache.get('0.00,0.00'))"));
+  row.hourly.wind_speed_10m.fill(null);
+  let requests = 0;
+  const run = app('open-meteo', async () => {
+    requests++;
+    return {ok: true, json: async () => row};
+  });
+  run('openMeteoWeather.prime([{lat: 0, lon: 0}], 2)');
+  await settle();
+  run(`Date.now = () => ${when + 14999}; readState()`);
+  assert.equal(requests, 1);
+  run(`Date.now = () => ${when + 15000}; readState()`);
+  assert.equal(requests, 2);
+  await settle();
+});
+
 test('manual retry bypasses fresh cache and failure cooldown without changing the scenario', async () => {
   let requests = 0;
   const run = app('open-meteo', async () => {
@@ -53,10 +72,10 @@ test('hung requests time out, retain cached wind, and allow an automatic retry',
   assert.equal(run('openMeteoWeather.pending'), false);
   assert.equal(run("openMeteoWeather.cache.get('0.00,0.00').hourly.wind_speed_10m[0]"), 12);
   assert.equal(run('flightAt(0, 0, Date.now())'), null);
-  run(`Date.now = () => ${when + 74999}; openMeteoWeather.prime([{lat: 0, lon: 0}], 2)`);
+  run(`Date.now = () => ${when + 29999}; openMeteoWeather.prime([{lat: 0, lon: 0}], 2)`);
   assert.equal(requests, 1);
   const stale = finishOld;
-  run(`Date.now = () => ${when + 75000}; openMeteoWeather.prime([{lat: 0, lon: 0}], 2)`);
+  run(`Date.now = () => ${when + 30000}; openMeteoWeather.prime([{lat: 0, lon: 0}], 2)`);
   assert.equal(requests, 2);
   stale({ok: true, json: async () => ({hourly: {time: [1]}, daily: {time: [1]}})});
   await settle();

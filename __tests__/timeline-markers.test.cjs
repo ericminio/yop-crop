@@ -65,3 +65,11 @@ test('timeline starts at day 1 to match the mission clock', () => {
   run('drawTimeline({ missionDay: 0 }, 0, tracks)');
   assert.equal(run("labels.find(label => /^D[0-9]/.test(label.text)).text"), 'D1');
 });
+
+test('timeline acknowledges delayed weather while keeping sowing and cycle markers visible', () => {
+  const run = timeline();
+  run('tracks[0].estimatedFrom = 0; tracks[1].estimatedFrom = 0; drawTimeline({ missionDay: 10, wx: {estimated: true} }, 10, tracks)');
+  assert.equal(run("labels.filter(label => label.text === 'weather delayed · estimated cycles').length"), 2);
+  assert.equal(run("labels.some(label => label.text === 'sown D21')"), true);
+  assert.equal(run("labels.some(label => label.text === 'click to sow')"), true);
+});

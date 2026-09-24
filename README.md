@@ -8,6 +8,46 @@ its crops need.
 
 `index.html` renders the platform.
 
+## Historical replay
+
+Open **Replay…** under the mission clock, choose a UTC date and time, and select
+**Start new mission**. Replay starts paused at the current location; choose 1×,
+60×, 360× or 1440× to play. At 1440×, one real minute represents one game day
+including while weather loads. Choose **Paused** to stop, or **Return to live** inside
+Replay to start a new live mission at the current location. Starting either mode
+clears sowing dates and the route. The date is kept in the URL; reloading starts
+that replay again, paused.
+
+For example, `?replay=2022-01-01T12:00&lat=48.85&lon=2.35` starts over Paris.
+Dates range from January 1, 2022 to the present. When the clock catches up with
+the present, it automatically continues in real time without resetting the
+mission, sowing dates or route. The URL also returns to live mode. Mission days, drift, weather, sunlight and crop timing all use
+the replay clock. Returning from a suspended tab advances at most one real
+second's worth of simulation instead of catching up the entire absence.
+
+This is a **hindsight forecast**: archived GFS weather fills the same 16-day
+window used by the live forecast, including later historical conditions. It is
+modeled historical weather, not the forecast a player could actually have seen
+at that time, and not direct observations at every point. The
+[Historical Forecast API](https://open-meteo.com/en/docs/historical-forecast-api)
+provides the existing surface and pressure-level fields. Current and past missing
+conditions are explicitly estimated while data loads.
+Missing future outlooks remain unavailable.
+
+Within five days of the present, replay uses the live forecast endpoint and its
+recent history so archive publication delays cannot block the handoff. Its
+forecast outlook then follows the live forecast window; the label changes to
+**Catching up**.
+
+Replay weather is requested on a 0.25° coordinate grid to reuse nearby weather
+while moving quickly. Cache entries are separated by game date, and archived
+values do not expire every 15 real minutes; recent live forecasts still do.
+Requests include up to 92 prior days,
+as in live mode. Network retries still use real time; archive requests time out
+after 45 seconds. The clock keeps its selected speed during outages.
+**Estimated** labels the
+provisional weather and position; **Correcting route** indicates recovery.
+
 ## Weather adapters
 
 Open-Meteo forecasts are the default, so the flight level selector is enabled
@@ -15,15 +55,18 @@ without a URL parameter. Open `index.html?weather=simulated` to use generated
 weather, including wind; flight level selection is disabled in simulated mode.
 Open-Meteo uses simulated crop conditions as the fallback when surface forecast
 coverage is unavailable.
-Drift and the heading display only use forecast wind in Open-Meteo mode;
-missing or invalid wind pauses drift and hides the map's direction arrow.
+During an outage, drift and heading use cached or last known wind at the selected
+level, marked as estimated. Before any wind has loaded for that level, generated
+wind keeps the game moving. API-only wind validation remains strict for route
+reconstruction.
 The Open-Meteo weather adapter returns crop conditions only. Surface and
 pressure-level flight wind use the same reader and validation; the selected
 level determines the forecast fields, and pressure levels also require altitude.
 
-Cached forecasts refresh after 15 minutes, even when the platform is stationary.
-Cached crop conditions remain available during refresh, but wind expires after
-15 minutes and cannot advance the route until refreshed. Failed requests retry
+In live mode, cached forecasts refresh after 15 minutes, even when the platform is stationary.
+Cached conditions remain visible during refresh. Wind older than 15 real minutes
+can drive the estimated position but cannot advance the confirmed route.
+Failed requests retry
 after one minute. These checks run when animation frames run, so returning to a
 suspended tab also triggers any overdue refresh.
 
@@ -46,32 +89,40 @@ The altitude display uses the selected level's forecast geopotential height in
 metres above sea level (ASL), which varies with place and time. Changing levels
 finishes elapsed movement at the previous level, then switches wind without
 changing horizontal position. Missing or invalid selected-level wind or height
-pauses drift and displays unavailable data, rather than substituting surface wind.
-The last reconstructed position and its time form a checkpoint. Missing, invalid,
-or expired wind holds that checkpoint and retains all elapsed movement time.
-The header displays “position uncertain · awaiting wind history”; the coordinates'
-tooltip gives the checkpoint time. The amber trail becomes dotted while the
-position is uncertain and returns to solid once catch-up completes. It still ends
-at the last reconstructed position, with no guessed extension.
-The retry button also works when current wind
-is available but the route still has a historical gap.
+leaves the confirmed route at
+its last verified checkpoint. The displayed position continues using estimates;
+it is separate from the checkpoint and never becomes confirmed merely because
+time has passed. The dotted amber trail and **estimated position** readout make
+that distinction visible.
 
-Recovery reconstructs movement from the checkpoint with fresh weather for each
-location and historical hour along the route. Each frame processes at most 240
-one-minute steps. Missing hourly coverage stops reconstruction rather than using
-current wind or extending an old sample indefinitely. Incomplete route weather
-is retried at most once per minute automatically; the button can retry sooner.
-Flight-level changes during an outage are retained with their times, so each
-reconstructed interval uses the level selected then. Manual relocation explicitly
-starts a new route and clears its unresolved history.
+Background recovery reconstructs the missing interval using fresh weather for
+each location, historical hour and selected flight level along the route. Each
+frame processes at most 240 one-minute steps. Missing hourly coverage stops only
+this background reconstruction. Automatic retries use real time and the retry
+button prioritizes the confirmed checkpoint. Manual relocation clears both the
+confirmed and estimated route, pending corrections and remembered weather.
 
-Positions remain weather-model estimates, not observed fixes. Freshness means
-fetched within 15 minutes, not a guarantee of wind accuracy. Completed intervals
-are not retroactively revised by later forecasts. If the needed historical wind
-cannot be retrieved (requests include at most 92 past days), the position remains
-uncertain instead of silently skipping the gap. No provisional movement is added
-while waiting for usable wind.
+Once reconstruction catches the game clock, the displayed position eases toward
+the corrected position over five real seconds, including when replay is paused.
+The correction takes the short direction across the date line. Further outages
+continue from the currently displayed position. Estimated trail points are
+replaced by the reconstructed route; no estimated point is promoted to verified
+history. Position remains uncertain until the correction completes.
 
+Crop conditions during outages use the last complete conditions at the selected
+level, adjusted by the generated model's change in season and time of day. With
+no sample, the generated model supplies initial values. Its altitude approximation
+uses a standard-atmosphere pressure height and a 6.5 °C/km temperature lapse;
+this is a gameplay fallback, not validated atmospheric weather. Current and past
+crop calculations can use these labeled estimates; missing future forecasts stay
+unavailable. On recovery the current weather readout blends to actual API values
+over five real seconds, and crop tracks recalculate from available history.
+
+Positions remain weather-model estimates, not observed fixes. If historical wind
+cannot be retrieved, the confirmed checkpoint remains unresolved while the game
+continues in estimated mode. Completed confirmed intervals are not retroactively
+revised by later forecasts. Archive recovery remains available after replay has
+caught up to live time.
 
 Crop temperature, humidity and cloud cover also come from the selected level.
 VPD is derived from its temperature and relative humidity. Daily temperature
@@ -80,9 +131,9 @@ thermal growth and crop needs. Switching levels recalculates crop tracks and
 candidate outlooks at that level. Tracks are scenarios for the currently selected
 level, not a persisted history of previously flown levels.
 
-Missing pressure-level crop weather stays unavailable, including beyond forecast
-coverage. Crop projections end at the first missing day without reporting a
-thermal stall. Radiation at altitude is estimated hourly from surface radiation:
+Missing pressure-level forecast inputs remain unavailable in the API adapter.
+The current/past gameplay fallback is labeled estimated; future crop projections
+end at the first missing day without reporting a thermal stall. Radiation at altitude is estimated hourly from surface radiation:
 
 `radiation aloft = surface radiation × (1 − 0.75 × cloud overhead) / (1 − 0.75 × surface cloud)`
 
@@ -136,22 +187,40 @@ There is no model of ascent/descent, terrain clearance or route feasibility.
 The pressure levels and variables are documented in the
 [Open-Meteo forecast API](https://open-meteo.com/en/docs#pressure-level-variables).
 
-Position advances in real time with the selected adapter's wind, starting from
+In live mode, position advances in real time with the selected adapter's wind, starting from
 the initial position. Each page load starts a new mission on day 1. Selecting a
 new position restarts the mission on day 1, clears sowing dates and the timeline
 selection, and resets the movement clock there. Wind drift does not restart the
-mission. Mission days advance every 24 elapsed hours; calendar dates and weather
-continue to use the current real time.
+mission. The displayed mission day advances at local solar midnight at the
+farm’s position, so day 1 can be shorter than 24 hours. Longitude is tracked
+continuously across the antimeridian; corrections never decrease the counter
+or count the same midnight twice. Crop ages and timeline offsets remain based
+on elapsed time. The calendar date beside the UTC clock stays in UTC.
 The map and coordinates follow the drift; scrubbing the crop timeline does not
 move the platform. An amber trail in the Position panel follows the route from
 the session's starting position to FF1, retaining a point each minute plus its
 live position. Clicking to relocate clears the trail and starts it there.
 After a suspended tab resumes, elapsed time is integrated in
-steps using weather along the route, waiting for uncached route forecasts in
-Open-Meteo mode and retaining elapsed time for unavailable wind samples. Reloading starts a new session;
+steps using weather along the route. Open-Meteo reconstruction retains elapsed
+time for unavailable wind while the displayed position continues provisionally. Reloading starts a new session;
 the flight path and selected level are not persisted.
 
+Failed weather requests retry automatically after 15 real seconds, including
+while replay is paused. Manual retry skips this delay. Request timeouts remain
+45 seconds for historical weather and 15 seconds for live forecasts.
+
+Crop cycles remain visible through weather outages. Missing daily growth rates
+reuse the preceding outlook at the same flight level; days without prior data
+use the altitude-adjusted seasonal model. Amber dashed outlines mark provisional
+cycles, with a weather-delay label during an outage. Fresh weather recalculates
+the cycles automatically. These estimates also extend the timeline beyond the
+available forecast, but do not fill missing relocation-candidate forecasts.
+Changing level or resetting the mission discards the previous crop estimates.
+
 Run the weather and movement checks with `node --test __tests__/*.test.cjs`.
+With the local server running, open `/__tests__/header-layout.html` to run browser
+geometry checks for loading, available, estimated and recovering weather at five
+viewport widths, including collapsed readouts. Every result should say `PASS`.
 The `Tests` GitHub Actions check runs both suites on every pull request and on
 pushes to `dev`, using Node.js 22.
 

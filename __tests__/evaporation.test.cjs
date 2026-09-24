@@ -36,7 +36,7 @@ test('incomplete daily temperature, humidity or height leaves evaporation unavai
     'hourly.geopotential_height_850hPa[0] = null', 'hourly.shortwave_radiation[12] = null']) {
     const run = evaporationForecast();
     run(mutation);
-    assert.equal(run('Number.isNaN(readState().et0)'), true, mutation);
+    assert.equal(run('Number.isNaN(pressureWeatherAt(sim.lat, sim.lon, gameNow()).et0_fao_evapotranspiration)'), true, mutation);
   }
 });
 

@@ -57,16 +57,35 @@
   #top.collapsed .cell, #tl.collapsed #tlcanvas, #tl.collapsed .lg { display: none; }
   #top .tab { position: absolute; right: 0; top: 100%; padding: 3px 10px;
     background: rgba(6,17,27,0.72); border: 1px solid var(--edge); border-top: 0; }
-  #top { z-index: 3; position: absolute; top: 0; left: 0; right: 0; display: flex; gap: 1px;
+  #top { z-index: 3; position: absolute; top: 0; left: 0; right: 0; display: grid; gap: 1px;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.4fr) minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1.2fr);
+    grid-auto-rows: 88px;
     background: rgba(6,17,27,0.72); border-bottom: 1px solid var(--edge);
     backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px); }
-  #top .cell { padding: 7px 13px; border-right: 1px solid rgba(111,224,255,0.12); }
+  #top .cell { min-width: 0; padding: 7px 13px; border-right: 1px solid rgba(111,224,255,0.12); }
+  #top .big, #top .sub, #top .lab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #top .cell:last-child { border-right: 0; }
   #top .lab { font-size: 8.5px; letter-spacing: 0.18em; color: var(--dim);
     text-transform: uppercase; margin-bottom: 3px; }
   #top .big { font-size: 17px; line-height: 1.05; font-variant-numeric: tabular-nums;
               white-space: nowrap; }
   #top .sub { font-size: 9.5px; color: var(--dim); margin-top: 2px; white-space: nowrap; }
+  .replay-controls { display: flex; align-items: center; gap: 6px; margin-top: 6px; pointer-events: auto; }
+  .replay-controls button, .replay-controls select, .replay-controls input {
+    background: #0a1b29; color: var(--cyan); border: 1px solid var(--edge);
+    font: inherit; font-size: 10px; padding: 4px 6px; color-scheme: dark; }
+  .replay-controls button, .replay-controls summary, .replay-controls select { cursor: pointer; }
+  .replay-controls details, #replay-speed { flex-shrink: 0; }
+  .replay-controls details { position: relative; }
+  .replay-controls summary { color: var(--cyan); font-size: 10px; }
+  #replay-form { position: absolute; left: -80px; top: 24px; width: 270px; padding: 14px;
+    background: #0a1b29; border: 1px solid var(--cyan); box-shadow: 0 8px 28px #0009; }
+  #replay-form label { display: block; margin: 10px 0 5px; color: var(--ink); }
+  #replay-form p { color: var(--dim); font-size: 10px; line-height: 1.5; margin: 0 0 8px; }
+  #replay-form input { width: 100%; box-sizing: border-box; margin-bottom: 10px; }
+  #replay-form .actions { display: flex; justify-content: space-between; }
+  #replay-state { color: var(--amber); font-size: 9px; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
   .flight-control { position: absolute; top: 9px; right: 7px; bottom: 10px; width: 48px;
     display: flex; flex-direction: column; align-items: center; gap: 7px;
     border-left: 1px solid var(--edge); padding-left: 6px; }
@@ -81,7 +100,10 @@
   #position.collapsed > .ttl { margin-right: 0; }
   #position.collapsed .flight-control { display: none; }
   #ident .big { color: var(--cyan); letter-spacing: 0.06em; }
-  #top .spacer { flex: 1; border-right: 0; padding: 0; }
+  #top #ident .sub { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+  #status { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #top .spacer { display: none; }
+  #top .gauge { max-width: 100%; }
   .chip { display: inline-block; padding: 1px 6px; border: 1px solid currentColor;
     background: transparent; color: inherit; font-family: inherit;
     font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase; }
@@ -195,11 +217,16 @@
 
   @media (max-width: 1120px) { :root { --colw: 198px; --colrw: 268px; } }
   @media (max-width: 940px) { #colL { display: none; } #top .cell.opt { display: none; }
+    #top { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.4fr) minmax(0, 1fr); }
     #colM { left: 14px; } }
-  @media (max-width: 700px) { #colM { display: none; } }
+  @media (max-width: 700px) { #colM { display: none; }
+    #top { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); grid-template-rows: 88px 78px; }
+    #replay-form { left: auto; right: 0; }
+  }
   @media (max-width: 640px) { #colR { left: 14px; right: 14px; width: auto; }
     #tl { height: 150px; } #tlcanvas { height: 116px; } }
   @media (max-height: 620px) { #colR, #colL { bottom: 160px; } }
+  #top.collapsed { grid-template-rows: none; }
 </style>
 </head>
 <body>
@@ -210,12 +237,31 @@
   <div id="top">
     <div class="cell" id="ident">
       <div class="lab">Vehicle</div><div class="big">FF1</div>
-      <div class="sub">flying farm &middot; <button type="button" id="status" class="chip" disabled>nominal</button></div>
+      <div class="sub">flying farm <button type="button" id="status" class="chip" disabled>nominal</button></div>
     </div>
     <div class="cell">
       <div class="lab">Mission clock</div><div class="big" id="clock">--:--:--</div>
-      <div class="sub">day <span id="mday">—</span> &middot; <span id="datestr">—</span>
+      <div class="sub">day <span id="mday" title="Advances at local solar midnight; crop growth uses elapsed time">—</span> &middot; <span id="datestr">—</span>
         &middot; <span id="lstnow">—</span> LST</div>
+      <div class="replay-controls">
+        <select id="replay-speed" aria-label="Replay speed" hidden>
+          <option value="0">Paused</option><option value="1">1×</option>
+          <option value="60">60×</option><option value="360">360×</option>
+          <option value="1440">1440×</option>
+        </select>
+        <details id="replay-settings">
+          <summary>Replay…</summary>
+          <form id="replay-form">
+            <p>Fly through past weather. Historical conditions stand in for the forecast, including the days ahead.</p>
+            <label for="replay-start">Start time (UTC)</label>
+            <input id="replay-start" type="datetime-local" required min="2022-01-01T00:00">
+            <p>Available from January 2022. Starts paused here; switches to live time when it reaches the present. Starting a mission clears crops and the flight trail.</p>
+            <div class="actions"><button type="submit">Start new mission</button>
+              <button type="button" id="replay-live">Return to live</button></div>
+          </form>
+        </details>
+        <span id="replay-state" aria-live="polite"></span>
+      </div>
     </div>
     <div class="cell">
       <div class="lab">Position</div><div class="big" id="latlon">—</div>
@@ -372,7 +418,46 @@
   const TOTAL_AREA = CROPS.reduce(function (s, c) { return s + c.area; }, 0);
   const ROCK_DARK = [70,58,48], BALLOON_COLOR = [226,196,74];
 
-  let missionStartedAt = Date.now();
+  const REPLAY_MIN = Date.UTC(2022, 0, 1);
+  const replayInput = new URLSearchParams(location.search).get('replay');
+  const replayStart = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(replayInput || '')
+    ? Date.parse(replayInput + 'Z') : NaN;
+  let replayClock = Number.isFinite(replayStart) && replayStart >= REPLAY_MIN && replayStart <= Date.now()
+    ? { time: replayStart, speed: 0, lastReal: Date.now() } : null;
+
+  let replayCompleted = false;
+
+  function gameNow() { return replayClock ? replayClock.time : Date.now(); }
+  function usesArchive(when) { return when < Date.now() - 5 * 86400000; }
+  function utcDate(when) { return new Date(when).toISOString().slice(0, 10); }
+  function setReplaySpeed(speed) {
+    if (!replayClock || ![0, 1, 60, 360, 1440].includes(speed)) return;
+    readState();
+    if (!replayClock) return;
+    replayClock.speed = speed;
+    replayClock.lastReal = Date.now();
+  }
+  function advanceReplay() {
+    const real = Date.now();
+    const elapsed = Math.max(0, Math.min(1000, real - replayClock.lastReal));
+    replayClock.lastReal = real;
+    const target = Math.min(real, replayClock.time + elapsed * replayClock.speed);
+    replayClock.time = target;
+    if (replayClock.time >= real) {
+      const key = openMeteoWeather.key(sim.lat, sim.lon);
+      const row = openMeteoWeather.cache.get(key);
+      const fetched = openMeteoWeather.fetchedAt.get(key);
+      replayClock = null;
+      replayCompleted = true;
+      if (row) {
+        const liveKey = openMeteoWeather.key(sim.lat, sim.lon);
+        openMeteoWeather.cache.set(liveKey, row);
+        openMeteoWeather.fetchedAt.set(liveKey, fetched);
+      }
+    }
+  }
+
+  let missionStartedAt = gameNow();
   const FORECAST_DAYS = 16;
   const PRESSURE_LEVELS = [1000, 975, 950, 925, 900, 850, 800, 700, 600,
                          500, 400, 300, 250, 200, 150, 100, 70, 50, 30];
@@ -380,6 +465,7 @@
   let pressureLevel = null;
   const sim = { lat: 0, lon: 0, alt: null, hdg: 0, drift: 0,
                 fuel: 0.62, cloud: 0.22, water: 9.6 };
+  let missionCalendar = newMissionCalendar(missionStartedAt, sim.lon);
   let scrub = null;
   let nowDay = 0;
 
@@ -389,6 +475,19 @@
   function localSolar(utcHours, lonDeg) {
     const t = utcHours + lonDeg / 15;
     return ((t % 24) + 24) % 24;
+  }
+
+  function newMissionCalendar(when, longitude) {
+    return { longitude: longitude, unwrappedLongitude: longitude,
+             startDay: Math.floor((when + longitude * 240000) / 86400000), day: 1 };
+  }
+
+  function solarMissionDay(when, longitude) {
+    missionCalendar.unwrappedLongitude += wrappedLongitude(longitude - missionCalendar.longitude);
+    missionCalendar.longitude = longitude;
+    const localDay = Math.floor((when + missionCalendar.unwrappedLongitude * 240000) / 86400000);
+    missionCalendar.day = Math.max(missionCalendar.day, localDay - missionCalendar.startDay + 1);
+    return missionCalendar.day;
   }
 
   function solar(latDeg, doy, lstHours) {
@@ -499,38 +598,52 @@
     fetchedAt: new Map(),
     revision: 0,
     refreshMs: 15 * 60000,
+    retryMs: 15000,
     retryAt: 0,
     pending: false,
-    key: function (lat, lon) { return lat.toFixed(2) + ',' + lon.toFixed(2); },
-    prime: function (points, pastDays, force) {
+    coordinate: function (value, when = gameNow()) { return replayClock || usesArchive(when) ? Math.round(value * 4) / 4 : value; },
+    key: function (lat, lon, when = gameNow()) {
+      const locationKey = Number(this.coordinate(lat, when).toFixed(2)).toFixed(2) + ',' + Number(this.coordinate(lon, when).toFixed(2)).toFixed(2);
+      return replayClock || usesArchive(when) ? locationKey + '@' + (usesArchive(when) ? 'history:' : 'forecast:') + utcDate(when) : locationKey;
+    },
+    prime: function (points, pastDays, force, when = gameNow()) {
       const now = Date.now();
       if (this.pending || (!force && now < this.retryAt)) return;
       const self = this;
       const miss = points.filter(function (pt) {
-        const key = self.key(pt.lat, pt.lon);
+        const key = self.key(pt.lat, pt.lon, when);
         return force || !self.cache.has(key) || !self.fetchedAt.has(key) ||
-          now - self.fetchedAt.get(key) >= self.refreshMs;
+          (!usesArchive(when) && now - self.fetchedAt.get(key) >= self.refreshMs);
       });
       if (!miss.length) return;
+      const keys = miss.map(function (pt) { return self.key(pt.lat, pt.lon, when); });
+      const historical = usesArchive(when);
       this.pending = true;
-      this.retryAt = now + 60000;
-      const back = Math.max(1, Math.min(92, Math.ceil(pastDays || 1)));
+      this.retryAt = now + this.retryMs;
+      const historyDays = replayClock ? Math.max(pastDays || 1, (when - missionStartedAt) / 86400000 + 2) : pastDays || 1;
+      const liveOffset = replayClock && !historical ? (now - when) / 86400000 : 0;
+      const back = Math.max(1, Math.min(92, Math.ceil(historyDays + liveOffset)));
       const controller = new AbortController();
       let timer;
       const timeout = new Promise(function (_, reject) {
         timer = setTimeout(function () {
           reject(new Error('Weather request timed out'));
           controller.abort();
-        }, 15000);
+        }, historical ? 45000 : 15000);
       });
-      const request = fetch(this.endpoint +
-        '?latitude=' + miss.map(function (pt) { return pt.lat.toFixed(4); }).join(',') +
-        '&longitude=' + miss.map(function (pt) { return pt.lon.toFixed(4); }).join(',') +
+      const endpoint = historical ? 'https://historical-forecast-api.open-meteo.com/v1/forecast' : this.endpoint;
+      const range = historical
+        ? '&models=gfs_global&start_date=' + utcDate(Math.max(REPLAY_MIN, when - back * 86400000)) +
+          '&end_date=' + utcDate(Math.min(Date.now() - 86400000, when + (FORECAST_DAYS - 1) * 86400000))
+        : '&past_days=' + back + '&forecast_days=' + FORECAST_DAYS;
+      const request = fetch(endpoint +
+        '?latitude=' + miss.map(function (pt) { return self.coordinate(pt.lat, when).toFixed(4); }).join(',') +
+        '&longitude=' + miss.map(function (pt) { return self.coordinate(pt.lon, when).toFixed(4); }).join(',') +
         '&hourly=' + this.hourly.join(',') +
         '&daily=' + this.daily.join(',') +
         '&wind_speed_unit=kmh' +
-        '&past_days=' + back +
-        '&forecast_days=' + FORECAST_DAYS + '&timeformat=unixtime&timezone=UTC',
+        range +
+        '&timeformat=unixtime&timezone=UTC',
         { signal: controller.signal })
         .then(function (r) {
           if (!r.ok) throw new Error('Weather request failed');
@@ -542,18 +655,18 @@
           let loaded = 0;
           rows.forEach(function (row, i) {
             if (row && row.hourly?.time?.length && row.daily?.time?.length && miss[i]) {
-              const key = self.key(miss[i].lat, miss[i].lon);
+              const key = keys[i];
               self.cache.set(key, row);
               self.fetchedAt.set(key, Date.now());
               self.revision++;
               loaded++;
             }
           });
-          self.retryAt = loaded === miss.length ? 0 : Date.now() + 60000;
+          self.retryAt = loaded === miss.length ? 0 : Date.now() + self.retryMs;
           self.pending = false;
         })
         .catch(function () {
-          self.retryAt = Date.now() + 60000;
+          self.retryAt = Date.now() + self.retryMs;
           self.pending = false;
         })
         .finally(function () { clearTimeout(timer); });
@@ -571,8 +684,9 @@
       if (pressureLevel !== null) return pressureWeatherAt(lat, lon, when);
       const row = this.cache.get(this.key(lat, lon));
       if (!row || !this.covers(row, when)) {
+        if (replayClock) return Object.fromEntries(this.hourly.concat(this.daily).map(function (field) { return [field, NaN]; }));
         const { wind_speed_10m, wind_direction_10m, ...cropWeather } = simulatedWeather.at(lat, lon, when);
-        return cropWeather;
+        return { ...cropWeather, estimated: true, thermal_estimated: true };
       }
       const sec = when / 1000;
       const h = nearestIndex(row.hourly.time, sec);
@@ -592,7 +706,7 @@
   };
 
   const PROVIDERS = { simulated: simulatedWeather, 'open-meteo': openMeteoWeather };
-  let weather = PROVIDERS[new URLSearchParams(location.search).get('weather')] ||
+  let weather = (replayClock ? openMeteoWeather : PROVIDERS[new URLSearchParams(location.search).get('weather')]) ||
                 openMeteoWeather;
 
   function scoringPoints() {
@@ -616,6 +730,102 @@
   let positionTime = null;
   let positionTrail = [];
   let flightLevels = [];
+  let confirmedPosition = null;
+  let displayedPositionTime = null;
+  let estimatedRoute = false;
+  let positionCorrection = null;
+  let estimatedTrail = [];
+  const lastFlights = new Map();
+  const lastConditions = new Map();
+  const weatherTransitions = new Map();
+  const RECOVERY_MS = 5000;
+
+  function wrappedLongitude(lon) { return ((lon + 180) % 360 + 360) % 360 - 180; }
+
+  function movedPosition(latDeg, lonDeg, flight, dt) {
+    const arc = flight.speed * dt / 3600000 / 6371;
+    const bearing = (flight.direction + 180) * D;
+    const lat = latDeg * D, lon = lonDeg * D;
+    const nextLat = Math.asin(clamp(Math.sin(lat) * Math.cos(arc) +
+      Math.cos(lat) * Math.sin(arc) * Math.cos(bearing), -1, 1));
+    const nextLon = lon + Math.atan2(Math.sin(bearing) * Math.sin(arc) * Math.cos(lat),
+      Math.cos(arc) - Math.sin(lat) * Math.sin(nextLat));
+    return { lat: nextLat / D, lon: wrappedLongitude(nextLon / D) };
+  }
+
+  function generatedConditions(lat, lon, when, level = pressureLevel) {
+    const wx = simulatedWeather.at(lat, lon, when);
+    const altitude = level === null ? 0 : 44330 * (1 - Math.pow(level / 1013.25, 0.1903));
+    const lapse = altitude * 0.0065;
+    for (const field of ['temperature_2m', 'temperature_2m_min', 'temperature_2m_max']) wx[field] -= lapse;
+    wx.vapour_pressure_deficit = svp(wx.temperature_2m) * (1 - wx.relative_humidity_2m / 100);
+    wx.estimated = true;
+    return { wx: wx, altitude: altitude };
+  }
+
+  function estimatedFlightAt(lat, lon, when, level = pressureLevel) {
+    const actual = flightAt(lat, lon, when, level);
+    if (actual) {
+      const previous = lastFlights.get(level);
+      if (!previous || when >= previous.when) lastFlights.set(level, { when: when, flight: actual });
+      return actual;
+    }
+    const stale = flightAt(lat, lon, when, level, true);
+    if (stale) return { ...stale, estimated: true };
+    const known = lastFlights.get(level);
+    if (known) return { ...known.flight, estimated: true };
+    const generated = generatedConditions(lat, lon, when, level);
+    return { speed: generated.wx.wind_speed_10m, direction: generated.wx.wind_direction_10m,
+      altitude: level === null ? null : generated.altitude, estimated: true };
+  }
+
+  function conditionsAt(lat, lon, when) {
+    const raw = weather.at(lat, lon, when);
+    if (weather !== openMeteoWeather || when > gameNow()) return raw;
+    const key = weather.key(lat, lon);
+    const row = weather.cache.get(key);
+    const covered = row && weather.covers(row, when);
+    const fresh = covered && (usesArchive(when) || Date.now() - weather.fetchedAt.get(key) < weather.refreshMs);
+    const estimate = generatedConditions(lat, lon, when).wx;
+    const known = lastConditions.get(pressureLevel);
+    const fields = ['temperature_2m', 'temperature_2m_min', 'temperature_2m_max',
+      'relative_humidity_2m', 'vapour_pressure_deficit', 'cloud_cover', 'daylight_duration',
+      'shortwave_radiation_sum', 'et0_fao_evapotranspiration'];
+    const result = { ...raw, estimated: !fresh, thermal_estimated: !fresh };
+    for (const field of fields) {
+      if (covered && Number.isFinite(raw[field])) continue;
+      result[field] = known ? known.wx[field] + estimate[field] - known.baseline[field] : estimate[field];
+      result.estimated = true;
+      if (field === 'temperature_2m_min' || field === 'temperature_2m_max') result.thermal_estimated = true;
+    }
+    result.relative_humidity_2m = clamp(result.relative_humidity_2m, 0, 100);
+    result.cloud_cover = clamp(result.cloud_cover, 0, 100);
+    for (const field of ['vapour_pressure_deficit', 'shortwave_radiation_sum', 'et0_fao_evapotranspiration']) result[field] = Math.max(0, result[field]);
+    return result;
+  }
+
+  function displayedConditions(lat, lon, when) {
+    const wx = conditionsAt(lat, lon, when);
+    if (weather !== openMeteoWeather) return wx;
+    const previous = weatherTransitions.get(pressureLevel);
+    if (!wx.estimated) lastConditions.set(pressureLevel, { wx: wx, baseline: generatedConditions(lat, lon, when).wx });
+    let transition = previous;
+    if (wx.estimated) transition = { wx: wx, estimated: true };
+    else if (previous?.estimated) transition = { wx: previous.wx, from: previous.wx, started: Date.now() };
+    if (transition?.from) {
+      const progress = clamp((Date.now() - transition.started) / RECOVERY_MS, 0, 1);
+      const blended = { ...wx, estimated: progress < 1 };
+      for (const field of Object.keys(wx)) {
+        if (Number.isFinite(wx[field]) && Number.isFinite(transition.from[field]))
+          blended[field] = transition.from[field] + (wx[field] - transition.from[field]) * progress;
+      }
+      transition = progress < 1 ? { ...transition, wx: blended } : { wx: wx };
+      weatherTransitions.set(pressureLevel, transition);
+      return blended;
+    }
+    weatherTransitions.set(pressureLevel, transition || { wx: wx });
+    return wx;
+  }
 
   function recordPosition(time) {
     const last = positionTrail[positionTrail.length - 1];
@@ -715,15 +925,15 @@
     return Math.max(0, 0.408 * slope * net / (slope + gamma));
   }
 
-  function flightAt(lat, lon, when, level = pressureLevel) {
+  function flightAt(lat, lon, when, level = pressureLevel, allowStale = false) {
     if (level === null && weather !== openMeteoWeather) {
       const wx = weather.at(lat, lon, when);
       return { speed: wx.wind_speed_10m, direction: wx.wind_direction_10m, altitude: null };
     }
-    const key = openMeteoWeather.key(lat, lon);
+    const key = openMeteoWeather.key(lat, lon, when);
     const row = weather === openMeteoWeather && openMeteoWeather.cache.get(key);
     const fetched = openMeteoWeather.fetchedAt.get(key);
-    if (!Number.isFinite(fetched) || Date.now() - fetched >= openMeteoWeather.refreshMs) return null;
+    if (!Number.isFinite(fetched) || (!allowStale && !usesArchive(when) && Date.now() - fetched >= openMeteoWeather.refreshMs)) return null;
     if (!row || !openMeteoWeather.covers(row, when)) return null;
     const times = row.hourly.time, sec = when / 1000;
     if (sec < times[0] || sec > times[times.length - 1]) return null;
@@ -740,13 +950,13 @@
 
   function selectPressureLevel(level) {
     if (level !== null && !PRESSURE_LEVELS.includes(level)) throw new RangeError('Unknown pressure level');
-    advancePosition(Date.now());
+    advancePosition(gameNow());
     pressureLevel = level;
-    flightLevels.push({ time: Date.now(), level: level });
+    flightLevels.push({ time: gameNow(), level: level });
     readState();
   }
 
-  function advancePosition(now) {
+  function reconstructPosition(now) {
     if (positionTrail.length === 0) recordPosition(positionTime === null ? now : positionTime);
     if (positionTime === null || now <= positionTime) {
       if (positionTime === null) positionTime = now;
@@ -763,30 +973,76 @@
       const flight = flightAt(sim.lat, sim.lon, positionTime, level);
       if (!flight || (weather === openMeteoWeather && !flightAt(sim.lat, sim.lon, positionTime + dt, level))) {
         if (weather === openMeteoWeather) {
-          const fetched = weather.fetchedAt.get(weather.key(sim.lat, sim.lon));
-          if (now >= weather.retryAt && (!Number.isFinite(fetched) || now - fetched >= 60000)) {
-            weather.prime([{ lat: sim.lat, lon: sim.lon }], (now - positionTime) / 86400000 + 2, true);
+          const missingTime = flight ? positionTime + dt : positionTime;
+          const fetched = weather.fetchedAt.get(weather.key(sim.lat, sim.lon, missingTime));
+          const real = Date.now();
+          if (real >= weather.retryAt && (!Number.isFinite(fetched) || real - fetched >= weather.retryMs)) {
+            weather.prime([{ lat: sim.lat, lon: sim.lon }], (now - positionTime) / 86400000 + 2, true, missingTime);
           }
         }
         return;
       }
       positionTime += dt;
-      const distance = flight.speed * dt / 3600000;
-      if (distance === 0) continue;
-      const arc = distance / 6371, bearing = (flight.direction + 180) * D;
-      const lat = sim.lat * D, lon = sim.lon * D;
-      const nextLat = Math.asin(clamp(Math.sin(lat) * Math.cos(arc) +
-        Math.cos(lat) * Math.sin(arc) * Math.cos(bearing), -1, 1));
-      const nextLon = lon + Math.atan2(Math.sin(bearing) * Math.sin(arc) * Math.cos(lat),
-        Math.cos(arc) - Math.sin(lat) * Math.sin(nextLat));
-      sim.lat = nextLat / D;
-      sim.lon = ((nextLon / D + 180) % 360 + 360) % 360 - 180;
+      if (flight.speed === 0) continue;
+      Object.assign(sim, movedPosition(sim.lat, sim.lon, flight, dt));
       recordPosition(positionTime);
     }
   }
 
+  function projectedPosition(point, from, until) {
+    let result = { lat: point.lat, lon: point.lon };
+    const step = Math.max(60000, (until - from) / 240);
+    while (from < until) {
+      let level = flightLevels.length ? flightLevels[0].level : pressureLevel;
+      let next = until;
+      for (const change of flightLevels) {
+        if (change.time <= from) level = change.level;
+        else { next = change.time; break; }
+      }
+      const dt = Math.min(step, until - from, next - from);
+      const flight = estimatedFlightAt(result.lat, result.lon, from, level);
+      result = movedPosition(result.lat, result.lon, flight, dt);
+      from += dt;
+    }
+    return result;
+  }
+
+  function advancePosition(now) {
+    if (weather !== openMeteoWeather) return reconstructPosition(now);
+    const previous = { lat: sim.lat, lon: sim.lon };
+    const previousTime = displayedPositionTime;
+    if (confirmedPosition) Object.assign(sim, confirmedPosition);
+    reconstructPosition(now);
+    confirmedPosition = { lat: sim.lat, lon: sim.lon };
+    const missing = positionTime < now;
+    if (missing || estimatedRoute) {
+      const projected = projectedPosition(estimatedRoute && previousTime !== null ? previous : confirmedPosition,
+        estimatedRoute && previousTime !== null ? previousTime : positionTime, now);
+      if (missing) {
+        Object.assign(sim, projected);
+        positionCorrection = null;
+        const last = estimatedTrail[estimatedTrail.length - 1];
+        if (!last || now - last.time >= 60000) estimatedTrail.push({ ...projected, time: now });
+      } else {
+        positionCorrection = { lat: projected.lat - sim.lat,
+          lon: wrappedLongitude(projected.lon - sim.lon), started: Date.now() };
+        estimatedTrail = [];
+      }
+    }
+    if (positionCorrection) {
+      const progress = clamp((Date.now() - positionCorrection.started) / RECOVERY_MS, 0, 1);
+      sim.lat = clamp(sim.lat + positionCorrection.lat * (1 - progress), -90, 90);
+      sim.lon = wrappedLongitude(sim.lon + positionCorrection.lon * (1 - progress));
+      if (progress === 1) positionCorrection = null;
+    }
+    estimatedRoute = missing;
+    displayedPositionTime = now;
+    sim.positionUncertain = missing || !!positionCorrection;
+  }
+
   function readState() {
-    const now = Date.now();
+    if (replayClock) advanceReplay();
+    const now = gameNow();
     advancePosition(now);
     const d = new Date(now);
     const utcHours = d.getUTCHours() + d.getUTCMinutes()/60 + d.getUTCSeconds()/3600;
@@ -794,15 +1050,17 @@
     const missionDay = (now - missionStartedAt) / 86400000;
     const solarHours = localSolar(utcHours, sim.lon);
     const s = solar(sim.lat, doy, solarHours);
-    const wx = weather.at(sim.lat, sim.lon, now);
-    const flight = flightAt(sim.lat, sim.lon, now);
+    const wx = displayedConditions(sim.lat, sim.lon, now);
+    const flight = estimatedFlightAt(sim.lat, sim.lon, now);
     sim.flightAvailable = !!flight;
-    sim.positionUncertain = positionTime < now;
+    sim.weatherEstimated = !!wx.estimated || !!flight.estimated;
+    sim.positionUncertain = positionTime < now || !!positionCorrection;
     sim.alt = flight ? flight.altitude : null;
     sim.drift = flight ? flight.speed : 0;
     sim.hdg = flight ? (flight.direction + 180) % 360 : 0;
 
     return { now: now, d: d, lst: solarHours, doy: doy, missionDay: missionDay,
+             solarDay: solarMissionDay(now, sim.lon),
              sun: s, wx: wx,
              temp: wx.temperature_2m, rh: wx.relative_humidity_2m,
              vpd: wx.vapour_pressure_deficit,
@@ -814,11 +1072,16 @@
 
   const STALL_RATE = 0.5;
 
-  function buildTrack(c, sowDay, lat, lon, fromDay, missionDay, endDay) {
+  function buildTrack(c, sowDay, lat, lon, fromDay, missionDay, endDay, estimateRate = null) {
     const first = Math.max(0, Math.floor(fromDay)), rate = [];
+    let estimatedFrom = null;
     for (let d = first; d < endDay; d++) {
-      const wx = weather.at(lat, lon, dayMs(d));
+      const wx = conditionsAt(lat, lon, dayMs(d));
       rate[d] = Math.max(0, (wx.temperature_2m_max + wx.temperature_2m_min) / 2 - c.tBase);
+      if (estimateRate && (wx.thermal_estimated || !Number.isFinite(rate[d]))) {
+        rate[d] = estimateRate(d);
+        if (estimatedFrom === null) estimatedFrom = d;
+      }
     }
 
     const watch = Math.max(first, Math.floor(sowDay === null ? missionDay : sowDay));
@@ -850,9 +1113,10 @@
 
     let last = watch - 1;
     for (let d = watch; d < endDay; d++) if (rate[d] >= STALL_RATE) last = d;
-    const stall = unknownFrom === null && last + 1 < endDay ? Math.max(watch, last + 1) : null;
+    const stall = unknownFrom === null && estimatedFrom === null && last + 1 < endDay ? Math.max(watch, last + 1) : null;
 
-    return { segs: segs, stall: stall, unknownFrom: unknownFrom, rate: rate, sown: sowDay, from: watch };
+    return { segs: segs, stall: stall, unknownFrom: unknownFrom, estimatedFrom: estimatedFrom,
+             rate: rate, sown: sowDay, from: watch };
   }
 
   const devel = { key: null, tracks: null };
@@ -888,11 +1152,18 @@
     const primed = weather.revision || 0;
     const key = [weather.name, primed, pressureLevel, lat.toFixed(2), lon.toFixed(2),
                  Math.floor(missionDay), Math.floor(fromDay), Math.ceil(endDay),
-                 sown.join(',')].join('|');
+                 !!conditionsAt(lat, lon, gameNow()).estimated, sown.join(',')].join('|');
     if (devel.key !== key) {
+      const previous = devel.key && devel.level === pressureLevel ? devel.tracks : null;
       devel.key = key;
+      devel.level = pressureLevel;
       devel.tracks = CROPS.map(function (c, i) {
-        return buildTrack(c, sown[i], lat, lon, fromDay, missionDay, endDay);
+        return buildTrack(c, sown[i], lat, lon, fromDay, missionDay, endDay, function (day) {
+          const retained = previous?.[i].rate[day];
+          if (Number.isFinite(retained)) return retained;
+          const wx = generatedConditions(lat, lon, dayMs(day)).wx;
+          return Math.max(0, (wx.temperature_2m_max + wx.temperature_2m_min) / 2 - c.tBase);
+        });
       });
     }
     return devel.tracks;
@@ -1242,6 +1513,18 @@
         tctx.fillStyle = 'rgba(122,163,184,0.8)';
         tctx.font = '8.5px ui-monospace, Menlo, monospace';
         tctx.fillText('weather unavailable', ux + 4, by + bh/2);
+      }
+      if (Number.isFinite(track.estimatedFrom) && track.estimatedFrom < day0 + span) {
+        const ex = Math.max(padL, X(track.estimatedFrom));
+        tctx.save();
+        tctx.strokeStyle = 'rgba(255,200,97,0.65)';
+        tctx.setLineDash([3, 3]);
+        tctx.strokeRect(ex, by, Math.max(0, padL + plotW - ex), bh);
+        tctx.fillStyle = '#ffc861';
+        tctx.font = '8.5px ui-monospace, Menlo, monospace';
+        tctx.textAlign = 'right'; tctx.textBaseline = 'top';
+        tctx.fillText(st.wx?.estimated ? 'weather delayed · estimated cycles' : 'estimated cycles', padL + plotW - 4, by + bh + 2);
+        tctx.restore();
       }
       if (track.stall !== null && track.stall < day0 + span) {
         const sx = Math.max(padL, X(track.stall));
@@ -1612,7 +1895,7 @@
       mapLabel(Math.abs(w) + (w === 0 ? '' : w > 0 ? 'E' : 'W'), x, H - 3, GRID);
     }
 
-    const trail = positionTrail.concat([{ lat: sim.lat, lon: sim.lon }]);
+    const trail = positionTrail.concat(estimatedTrail.filter(point => point.time > positionTime), [{ lat: sim.lat, lon: sim.lon }]);
     mctx.strokeStyle = '#ffc861'; mctx.lineWidth = 2;
     mctx.setLineDash(sim.positionUncertain ? [1, 5] : []);
     mctx.lineCap = sim.positionUncertain ? 'round' : 'butt';
@@ -1736,7 +2019,9 @@
 
   el.status.addEventListener('click', function () {
     if (el.status.disabled || weather !== openMeteoWeather) return;
-    weather.prime([{ lat: sim.lat, lon: sim.lon }], (Date.now() - Math.min(missionStartedAt, positionTime ?? Date.now())) / 86400000 + 2, true);
+    const point = estimatedRoute && confirmedPosition ? confirmedPosition : sim;
+    const when = estimatedRoute ? positionTime : gameNow();
+    weather.prime([{ lat: point.lat, lon: point.lon }], (gameNow() - Math.min(missionStartedAt, when)) / 86400000 + 2, true, when);
     el.status.disabled = true;
     el.status.textContent = 'retrying weather…';
   });
@@ -1907,15 +2192,15 @@
     const d = st.d;
     el.clock.textContent = pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes())+':'+
                            pad2(d.getUTCSeconds())+' UTC';
-    el.mday.textContent = Math.floor(st.missionDay) + 1;
+    el.mday.textContent = st.solarDay;
     el.datestr.textContent = d.getUTCDate()+' '+MONTHS[d.getUTCMonth()]+' '+d.getUTCFullYear();
     el.latlon.textContent = Math.abs(sim.lat).toFixed(2)+'°'+(sim.lat>=0?'N':'S')+'  '+
                             Math.abs(sim.lon).toFixed(2)+'°'+(sim.lon>=0?'E':'W');
     el.alt.textContent = pressureLevel === null ? 'surface' :
       sim.alt === null ? 'altitude unavailable' : Math.round(sim.alt)+' m ASL';
     el.hdg.textContent = sim.flightAvailable ? pad2(Math.round(sim.hdg))+'°' : '—';
-    el.latlon.title = sim.positionUncertain ? 'Position reconstructed through ' + new Date(positionTime).toISOString() + '; awaiting wind history' : '';
-    el.drift.textContent = sim.positionUncertain ? 'position uncertain · awaiting wind history' : sim.flightAvailable ? sim.drift.toFixed(0)+' km/h' : 'wind unavailable · drift paused';
+    el.latlon.title = sim.positionUncertain ? 'Position reconstructed through ' + new Date(positionTime).toISOString() + '; displayed position estimated' : '';
+    el.drift.textContent = positionCorrection ? 'correcting route…' : sim.positionUncertain ? 'estimated position · ' + sim.drift.toFixed(0) + ' km/h' : sim.flightAvailable ? sim.drift.toFixed(0)+' km/h' : 'wind unavailable · drift paused';
 
     const scored = CROPS[SCORE_CROP];
     const scyc = phaseAt(tracks[SCORE_CROP], st.missionDay) || { idx: -2 };
@@ -1995,10 +2280,12 @@
       }
       E.root.classList.remove('idle');
       const n = c.need[cy.idx], a = axesOf(st.wx, c);
-      E.note.textContent = n.note;
+      const estimatedCycle = Number.isFinite(tracks[i].estimatedFrom) && markDay >= tracks[i].estimatedFrom;
+      E.note.textContent = n.note + (estimatedCycle ? ' · estimated cycle' : '');
 
       const ref = SPLIT[cy.idx] * c.days, proj = cy.phaseDays;
-      const gS = cy.open && tracks[i].unknownFrom !== null ? ['forecast ends','']
+      const gS = estimatedCycle ? ['estimated','warn']
+               : cy.open && tracks[i].unknownFrom !== null ? ['forecast ends','']
                : cy.open ? ['stalled','bad']
                : proj <= ref*1.1 ? ['ok','ok']
                : proj <= ref*1.5 ? ['slow','warn'] : ['stalled','bad'];
@@ -2054,11 +2341,11 @@
     const stallDay = tracks[SCORE_CROP].stall;
     const doomed = stallDay !== null;
     const ok = inBand && marg > 3 && sim.fuel > 0.2 && !doomed && Number.isFinite(st.dli);
-    const unavailable = weather === openMeteoWeather && (!Number.isFinite(st.temp) || !sim.flightAvailable || sim.positionUncertain);
+    const unavailable = weather === openMeteoWeather && (!Number.isFinite(st.temp) || !sim.flightAvailable || sim.positionUncertain || sim.weatherEstimated);
     el.status.disabled = !unavailable || openMeteoWeather.pending;
     el.status.title = unavailable ? 'Fetch weather again without resetting this tab' : '';
     el.status.textContent = unavailable
-      ? (openMeteoWeather.pending ? 'retrying weather…' : 'weather unavailable · retry')
+      ? (openMeteoWeather.pending ? 'estimated weather · retrying…' : 'estimated weather · retry')
       : !doomed ? (ok ? 'nominal' : 'attention')
       : stallDay <= st.missionDay ? 'stalled'
       : 'stall in ' + Math.round(stallDay - st.missionDay) + ' d';
@@ -2069,6 +2356,21 @@
 
   function frame(now) {
     const st = readState();
+    if (replayCompleted) {
+      const query = new URLSearchParams(location.search);
+      query.delete('replay');
+      query.delete('weather');
+      query.set('lat', sim.lat.toFixed(4));
+      query.set('lon', sim.lon.toFixed(4));
+      history.replaceState(null, '', '?' + query.toString());
+      document.getElementById('sim').textContent = weatherNote();
+      replayCompleted = false;
+    }
+    document.getElementById('replay-speed').hidden = !replayClock;
+    document.getElementById('replay-live').hidden = !replayClock;
+    document.getElementById('replay-speed').value = replayClock ? replayClock.speed : 0;
+    document.getElementById('replay-state').textContent = !replayClock ? 'Live'
+      : positionCorrection ? 'Correcting route' : sim.weatherEstimated || sim.positionUncertain ? 'Estimated' : usesArchive(st.now) ? 'Hindsight' : 'Catching up';
     const markDay = scrub === null ? st.missionDay : scrub;
     if (Number.isFinite(st.wx.cloud_cover)) sim.cloud = st.wx.cloud_cover / 100;
     weather.prime(scoringPoints(), st.missionDay + 2);
@@ -2096,8 +2398,9 @@
   function setPosition(lat, lon, source) {
     sim.lat = lat;
     sim.lon = ((lon + 180) % 360 + 360) % 360 - 180;
-    positionTime = Date.now();
+    positionTime = gameNow();
     missionStartedAt = positionTime;
+    missionCalendar = newMissionCalendar(missionStartedAt, sim.lon);
     sown.fill(null);
     scrub = null;
     nowDay = 0;
@@ -2105,6 +2408,14 @@
     outlook.key = null;
     flightLevels = [{ time: positionTime, level: pressureLevel }];
     sim.positionUncertain = false;
+    confirmedPosition = null;
+    displayedPositionTime = null;
+    positionCorrection = null;
+    estimatedRoute = false;
+    estimatedTrail = [];
+    lastFlights.clear();
+    lastConditions.clear();
+    weatherTransitions.clear();
     fixNote = '';
     positionTrail = [];
     recordPosition(positionTime);
@@ -2117,9 +2428,39 @@
   }
 
   function weatherNote() {
+    if (replayClock) return usesArchive(gameNow()) ? 'historical weather replay · hindsight forecast · GFS' : 'replay catching up · live forecast';
     return (weather === simulatedWeather ? 'simulated conditions' : 'open-meteo forecast') +
            (pressureLevel === null ? ' \u00b7 mission clock is real \u00b7 drifting with wind'
              : ' \u00b7 ' + pressureLevel + ' hPa wind & crop weather \u00b7 light & water demand estimated');
+  }
+
+  function setupReplayControls() {
+    const input = document.getElementById('replay-start');
+    input.max = new Date(Date.now()).toISOString().slice(0, 16);
+    input.value = replayClock ? new Date(missionStartedAt).toISOString().slice(0, 16)
+      : utcDate(Date.now() - 30 * 86400000) + 'T12:00';
+    const speed = document.getElementById('replay-speed');
+    speed.hidden = !replayClock;
+    speed.addEventListener('change', function () { setReplaySpeed(Number(speed.value)); });
+    document.getElementById('replay-form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (!input.reportValidity()) return;
+      const query = new URLSearchParams(location.search);
+      query.set('replay', input.value);
+      query.set('lat', sim.lat.toFixed(4));
+      query.set('lon', sim.lon.toFixed(4));
+      query.delete('weather');
+      location.search = query.toString();
+    });
+    document.getElementById('replay-live').hidden = !replayClock;
+    document.getElementById('replay-live').addEventListener('click', function () {
+      const query = new URLSearchParams(location.search);
+      query.delete('replay');
+      query.set('lat', sim.lat.toFixed(4));
+      query.set('lon', sim.lon.toFixed(4));
+      location.search = query.toString();
+    });
+    document.getElementById('replay-state').textContent = replayClock ? 'Hindsight' : 'Live';
   }
 
   function askPosition() {
@@ -2137,6 +2478,8 @@
       },
       { timeout: 10000, maximumAge: 600000 });
   }
+
+  setupReplayControls();
 
   const levelControl = document.getElementById('pressure-level');
   levelControl.max = PRESSURE_LEVELS.length;
