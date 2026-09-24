@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Header layout regression</title>
+<style>body { font: 14px monospace; } iframe { display: block; height: 240px; border: 0; }</style>
+<h1>Header layout regression</h1>
+<pre id="results">Running…</pre>
+<script>
+(async () => {
+  const source = new DOMParser().parseFromString(await (await fetch('../index.html', { cache: 'no-store' })).text(), 'text/html');
+  const states = [
+    { status: 'nominal', temp: '18.5', trange: '12° / 24°', gdd: '8.5', vpd: '1.23', rh: '76', cloud: '100', daylen: '16h 02m', dli: '38.2', drift: '23 km/h', 'replay-state': 'Hindsight' },
+    { status: 'estimated weather · retrying…', temp: '—', trange: '—', gdd: '—', vpd: '—', rh: '—', cloud: '—', daylen: '—', dli: '—', drift: 'wind unavailable · drift paused', 'replay-state': 'Estimated' },
+    { status: 'estimated weather · retry', temp: '-12.5', drift: 'estimated position · 123 km/h', 'replay-state': 'Estimated' },
+    { status: 'attention', drift: 'correcting route…', 'replay-state': 'Correcting route' }
+  ];
+  const results = [];
+  for (const width of [1440, 1120, 940, 595, 390]) {
+    const frame = document.createElement('iframe');
+    frame.style.width = width + 'px';
+    const loaded = new Promise(resolve => frame.onload = resolve);
+    frame.srcdoc = '<!doctype html><html>' + source.querySelector('style').outerHTML + '<body>' + source.querySelector('#top').outerHTML + '</body></html>';
+    document.body.append(frame);
+    await loaded;
+    const doc = frame.contentDocument;
+    doc.querySelector('#replay-speed').hidden = false;
+    for (const [id, value] of Object.entries({ clock: '12:00:00', mday: '365', datestr: '01 JUN 2022', lstnow: '12:09', latlon: '49.3753° N, 2.3689° E', alt: '1,500 m', hdg: '270°' })) doc.getElementById(id).textContent = value;
+    const measure = () => [...doc.querySelectorAll('#top, #top > .cell')].map(element => {
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return { x, y, width, height };
+    });
+    const baseline = measure();
+    states.forEach((state, index) => {
+      for (const [id, value] of Object.entries(state)) doc.getElementById(id).textContent = value;
+      const actual = measure();
+      const changes = actual.flatMap((rect, cell) => Object.keys(rect).filter(key => Math.abs(rect[key] - baseline[cell][key]) > 0.1).map(key => `cell ${cell} ${key}: ${baseline[cell][key]} → ${rect[key]}`));
+      results.push(`${changes.length ? 'FAIL' : 'PASS'} ${width}px state ${index + 1}${changes.length ? ': ' + changes.join(', ') : ''}`);
+    });
+    doc.querySelector('#top').classList.add('collapsed');
+    const collapsedHeight = doc.querySelector('#top').getBoundingClientRect().height;
+    results.push(`${collapsedHeight < 5 ? 'PASS' : 'FAIL'} ${width}px collapsed header: ${collapsedHeight}px`);
+  }
+  document.querySelector('#results').textContent = results.join('\n');
+})().catch(error => document.querySelector('#results').textContent = 'ERROR ' + error.stack);
+</script>
+</html>

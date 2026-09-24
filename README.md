@@ -203,6 +203,9 @@ time for unavailable wind while the displayed position continues provisionally. 
 the flight path and selected level are not persisted.
 
 Run the weather and movement checks with `node --test __tests__/*.test.cjs`.
+With the local server running, open `/__tests__/header-layout.html` to run browser
+geometry checks for loading, available, estimated and recovering weather at five
+viewport widths, including collapsed readouts. Every result should say `PASS`.
 The `Tests` GitHub Actions check runs both suites on every pull request and on
 pushes to `dev`, using Node.js 22.
 

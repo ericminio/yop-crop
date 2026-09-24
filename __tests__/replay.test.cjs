@@ -34,6 +34,16 @@ test('replay starts paused at the requested historical calendar time', () => {
   assert.equal(run('readState().now'), start);
 });
 
+test('mission days advance after each elapsed day even while weather is offline', () => {
+  const run = replay();
+  run('setReplaySpeed(1440)');
+  for (let second = 1; second <= 121; second++) {
+    run(`Date.now = () => ${when + second * 1000}; readState()`);
+    assert.equal(run('Math.floor(readState().missionDay) + 1'), Math.floor(second / 60) + 1);
+  }
+  assert.equal(run('missionStartedAt'), start);
+});
+
 test('archived requests select historical weather for the current forecast window', async () => {
   const requests = [];
   const run = replay(async url => { requests.push(new URL(url)); return {ok: true, json: async () => row()}; });
