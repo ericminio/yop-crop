@@ -201,20 +201,3 @@ test('forecast request includes both wind fields and explicit km/h units', async
     }
   }
 });
-
-test('arrival estimates refresh when wind speed changes at the same location', () => {
-  const run = app('open-meteo');
-  forecast(run);
-  run(script.slice(script.indexOf('  function dayMs('), script.indexOf('  const STALL_RATE')));
-  run(`
-    const outlook = { key: null, rows: null };
-    const CANDIDATES = [{ dist: 240, dLat: 2, dLon: 0.81 }];
-    function buildTrack() { return { segs: [], stall: null }; }
-  `);
-  run(script.slice(script.indexOf('  function candidateOutlooks('),
-    script.indexOf('  function candidateOutlooks(') + script.slice(script.indexOf('  function candidateOutlooks(')).indexOf('\n  }') + 4));
-  run('readState()');
-  assert.equal(run('candidateOutlooks(0, 0, Date.now(), 4, 140)[0].eta'), 10);
-  run('hourly.wind_speed_10m[0] = 48; readState()');
-  assert.equal(run('candidateOutlooks(0, 0, Date.now(), 4, 140)[0].eta'), 5);
-});

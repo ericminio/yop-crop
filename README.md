@@ -137,8 +137,39 @@ Crop temperature, humidity and cloud cover also come from the selected level.
 VPD is derived from its temperature and relative humidity. Daily temperature
 extremes require all 24 hourly samples of that UTC day; these extremes drive
 thermal growth and crop needs. Switching levels recalculates crop tracks and
-candidate outlooks at that level. Tracks are scenarios for the currently selected
+weather guidance at that level. Tracks are scenarios for the currently selected
 level, not a persisted history of previously flown levels.
+
+The **Find better weather** panel explains the selected crop’s current phase needs
+(or establishment needs before sowing). The crop selector defaults to the first
+planted crop, or potato when none is planted, and remembers an explicit selection
+for the session. Routes flag drops of five or more fit points for other planted
+crops, comparing their worst sampled conditions to their current weather using
+their current phase needs. The planner compares 12-hour wind routes at every
+available flight level. Each route follows hourly wind samples at its predicted
+positions and uses crop weather at that same level. The score beside each route
+is its average weather fit over the forecast hours shared by the available
+choices; ties favor the current level. Each choice states its own coverage.
+The panel shows up to three choices, retaining the current level when available.
+Staying at a level still means drifting with its wind.
+
+Arrival is the first hourly sample with a weather-fit score of at least 88/100.
+The suitable duration counts consecutive suitable hours along the continuing
+drift, bounded by the 12-hour outlook. When no sample reaches that threshold,
+the panel says so and shows the best available conditions. This is a comparison
+for the current crop phase, not a full harvest or multi-level flight plan.
+**Preview route** draws the drift and arrival marker on the map without moving
+the platform. **Set flight level** updates the existing flight control without
+resetting crops or the mission. Route origins refresh every 15 game minutes,
+on level/phase changes, or after moving over 0.25 degrees from the origin.
+
+Forecasts are fetched progressively along each route. Known portions appear
+immediately and stop at the first missing sample. Current conditions appear even
+while the first destination is loading, with route actions disabled until at
+least one hour is covered. Fallback crop estimates are excluded; uncertainty in the
+current position or weather disables route actions. Pressure-level radiation
+retains the altitude estimate described below. Simulated mode compares only the
+surface route and is explicitly labeled.
 
 Missing pressure-level forecast inputs remain unavailable in the API adapter.
 The current/past gameplay fallback is labeled estimated; future crop projections
@@ -223,7 +254,7 @@ reuse the preceding outlook at the same flight level; days without prior data
 use the altitude-adjusted seasonal model. Amber dashed outlines mark provisional
 cycles, with a weather-delay label during an outage. Fresh weather recalculates
 the cycles automatically. These estimates also extend the timeline beyond the
-available forecast, but do not fill missing relocation-candidate forecasts.
+available forecast, but do not fill missing route forecasts.
 Changing level or resetting the mission discards the previous crop estimates.
 
 Run the weather and movement checks with `node --test __tests__/*.test.cjs`.
