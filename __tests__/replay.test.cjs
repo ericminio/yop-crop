@@ -34,12 +34,13 @@ test('replay starts paused at the requested historical calendar time', () => {
   assert.equal(run('readState().now'), start);
 });
 
-test('mission days advance after each elapsed day even while weather is offline', () => {
+test('crop age stays elapsed while replay mission days advance at solar midnight', () => {
   const run = replay();
-  run('setReplaySpeed(1440)');
+  run('setReplaySpeed(1440); advancePosition = () => {}');
   for (let second = 1; second <= 121; second++) {
     run(`Date.now = () => ${when + second * 1000}; readState()`);
     assert.equal(run('Math.floor(readState().missionDay) + 1'), Math.floor(second / 60) + 1);
+    assert.equal(run('readState().solarDay'), Math.floor(0.5 + second / 60) + 1);
   }
   assert.equal(run('missionStartedAt'), start);
 });

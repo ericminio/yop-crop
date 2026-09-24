@@ -191,8 +191,11 @@ In live mode, position advances in real time with the selected adapter's wind, s
 the initial position. Each page load starts a new mission on day 1. Selecting a
 new position restarts the mission on day 1, clears sowing dates and the timeline
 selection, and resets the movement clock there. Wind drift does not restart the
-mission. Mission days advance every 24 elapsed hours; calendar dates and weather
-continue to use the current real time.
+mission. The displayed mission day advances at local solar midnight at the
+farm’s position, so day 1 can be shorter than 24 hours. Longitude is tracked
+continuously across the antimeridian; corrections never decrease the counter
+or count the same midnight twice. Crop ages and timeline offsets remain based
+on elapsed time. The calendar date beside the UTC clock stays in UTC.
 The map and coordinates follow the drift; scrubbing the crop timeline does not
 move the platform. An amber trail in the Position panel follows the route from
 the session's starting position to FF1, retaining a point each minute plus its

@@ -241,7 +241,7 @@
     </div>
     <div class="cell">
       <div class="lab">Mission clock</div><div class="big" id="clock">--:--:--</div>
-      <div class="sub">day <span id="mday">—</span> &middot; <span id="datestr">—</span>
+      <div class="sub">day <span id="mday" title="Advances at local solar midnight; crop growth uses elapsed time">—</span> &middot; <span id="datestr">—</span>
         &middot; <span id="lstnow">—</span> LST</div>
       <div class="replay-controls">
         <select id="replay-speed" aria-label="Replay speed" hidden>
@@ -465,6 +465,7 @@
   let pressureLevel = null;
   const sim = { lat: 0, lon: 0, alt: null, hdg: 0, drift: 0,
                 fuel: 0.62, cloud: 0.22, water: 9.6 };
+  let missionCalendar = newMissionCalendar(missionStartedAt, sim.lon);
   let scrub = null;
   let nowDay = 0;
 
@@ -474,6 +475,19 @@
   function localSolar(utcHours, lonDeg) {
     const t = utcHours + lonDeg / 15;
     return ((t % 24) + 24) % 24;
+  }
+
+  function newMissionCalendar(when, longitude) {
+    return { longitude: longitude, unwrappedLongitude: longitude,
+             startDay: Math.floor((when + longitude * 240000) / 86400000), day: 1 };
+  }
+
+  function solarMissionDay(when, longitude) {
+    missionCalendar.unwrappedLongitude += wrappedLongitude(longitude - missionCalendar.longitude);
+    missionCalendar.longitude = longitude;
+    const localDay = Math.floor((when + missionCalendar.unwrappedLongitude * 240000) / 86400000);
+    missionCalendar.day = Math.max(missionCalendar.day, localDay - missionCalendar.startDay + 1);
+    return missionCalendar.day;
   }
 
   function solar(latDeg, doy, lstHours) {
@@ -1046,6 +1060,7 @@
     sim.hdg = flight ? (flight.direction + 180) % 360 : 0;
 
     return { now: now, d: d, lst: solarHours, doy: doy, missionDay: missionDay,
+             solarDay: solarMissionDay(now, sim.lon),
              sun: s, wx: wx,
              temp: wx.temperature_2m, rh: wx.relative_humidity_2m,
              vpd: wx.vapour_pressure_deficit,
@@ -2177,7 +2192,7 @@
     const d = st.d;
     el.clock.textContent = pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes())+':'+
                            pad2(d.getUTCSeconds())+' UTC';
-    el.mday.textContent = Math.floor(st.missionDay) + 1;
+    el.mday.textContent = st.solarDay;
     el.datestr.textContent = d.getUTCDate()+' '+MONTHS[d.getUTCMonth()]+' '+d.getUTCFullYear();
     el.latlon.textContent = Math.abs(sim.lat).toFixed(2)+'°'+(sim.lat>=0?'N':'S')+'  '+
                             Math.abs(sim.lon).toFixed(2)+'°'+(sim.lon>=0?'E':'W');
@@ -2385,6 +2400,7 @@
     sim.lon = ((lon + 180) % 360 + 360) % 360 - 180;
     positionTime = gameNow();
     missionStartedAt = positionTime;
+    missionCalendar = newMissionCalendar(missionStartedAt, sim.lon);
     sown.fill(null);
     scrub = null;
     nowDay = 0;
