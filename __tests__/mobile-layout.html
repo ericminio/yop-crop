@@ -19,6 +19,11 @@
     await loaded;
     const doc = frame.contentDocument;
     const rect = selector => doc.querySelector(selector).getBoundingClientRect();
+    const nowButton = doc.querySelector('#nowbtn');
+    nowButton.style.visibility = 'visible';
+    const visibleLabels = [...nowButton.querySelectorAll('span')].filter(label => label.getClientRects().length > 0);
+    check(visibleLabels.length === 1, `${width}px back-to-now button shows exactly one label`);
+    check(visibleLabels.map(label => label.textContent).join('') === (width <= 940 ? '↶ Now' : 'back to now'), `${width}px back-to-now button shows the correct responsive label`);
     const panels = ['#position', '#crops', '#move', '#water', '#systems'];
     for (const selector of panels) {
       const box = rect(selector);
