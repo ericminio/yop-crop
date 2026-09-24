@@ -18,11 +18,11 @@ test('invalid wind retains the checkpoint and replays the missing interval after
   assert.equal(run('sim.positionUncertain'), true);
   run('hourly.wind_speed_10m[0] = 0.1; readState()');
   assert.equal(run('positionTime'), when + 60000);
-  assert.ok(Math.abs(km(run('sim.lon')) - 0.1 / 60) < 1e-8);
-  assert.equal(run('sim.positionUncertain'), false);
+  assert.ok(Math.abs(km(run('confirmedPosition.lon')) - 0.1 / 60) < 1e-8);
+  assert.equal(run('sim.positionUncertain'), true);
 });
 
-test('expired wind cannot move FF1 and fresh historical wind reconstructs the gap', async () => {
+test('expired wind cannot confirm movement and fresh historical wind reconstructs the gap', async () => {
   const fixture = app('open-meteo');
   cached(fixture);
   const row = JSON.parse(fixture("JSON.stringify(openMeteoWeather.cache.get('0.00,0.00'))"));
@@ -33,7 +33,7 @@ test('expired wind cannot move FF1 and fresh historical wind reconstructs the ga
     : new Promise(done => { resolve = done; }));
   cached(run);
   run(`readState(); Date.now = () => ${when + 20 * 60000}; readState()`);
-  assert.equal(run('sim.lon'), 0, 'stale eastward wind must not move FF1');
+  assert.equal(run('confirmedPosition.lon'), 0, 'stale wind must not advance the confirmed route');
   assert.equal(run('positionTime'), when);
   assert.equal(run('sim.positionUncertain'), true);
   assert.equal(typeof resolve, 'function');
@@ -42,9 +42,9 @@ test('expired wind cannot move FF1 and fresh historical wind reconstructs the ga
     await settle();
     run('readState()');
   }
-  assert.ok(Math.abs(km(run('sim.lon')) + 0.1 / 3) < 1e-8);
+  assert.ok(Math.abs(km(run('confirmedPosition.lon')) + 0.1 / 3) < 1e-8);
   assert.equal(run('positionTime'), when + 20 * 60000);
-  assert.equal(run('sim.positionUncertain'), false);
+  assert.equal(run('sim.positionUncertain'), true);
   assert.ok(run('positionTrail.every(point => point.lon <= 0)'));
 });
 
@@ -56,9 +56,9 @@ test('a level change during an outage preserves the wind selection for each inte
     Date.now = () => ${when + 60000}; selectPressureLevel(850);
     Date.now = () => ${when + 120000}; readState()`);
   assert.equal(run('positionTime'), when);
-  assert.equal(run('sim.lon'), 0);
+  assert.equal(run('confirmedPosition.lon'), 0);
   run('hourly.wind_speed_10m[0] = 0.1; readState()');
-  assert.ok(Math.abs(km(run('sim.lon')) + 0.1 / 60) < 1e-8);
+  assert.ok(Math.abs(km(run('confirmedPosition.lon')) + 0.1 / 60) < 1e-8);
   assert.equal(run('positionTime'), when + 120000);
   assert.equal(run('pressureLevel'), 850);
 });
@@ -70,7 +70,7 @@ test('fresh current weather cannot substitute for unavailable historical hours',
     hourly.time = hourly.time.map(t => t + 3600);
     openMeteoWeather.fetchedAt.set('0.00,0.00', Date.now()); readState()`);
   assert.equal(run('positionTime'), when);
-  assert.equal(run('sim.lon'), 0);
+  assert.equal(run('confirmedPosition.lon'), 0);
   assert.equal(run('sim.positionUncertain'), true);
   assert.equal(run('sim.flightAvailable'), true);
 });
@@ -96,7 +96,7 @@ test('catch-up cannot integrate beyond the final hourly wind sample', () => {
   run(`readState(); hourly.time = [${when / 1000}, ${when / 1000 + 30}];
     Date.now = () => ${when + 60000}; readState()`);
   assert.ok(run('positionTime') <= when + 30000);
-  assert.ok(km(run('sim.lon')) <= 0.1 / 120 + 1e-8);
+  assert.ok(km(run('confirmedPosition.lon')) <= 0.1 / 120 + 1e-8);
   assert.equal(run('sim.positionUncertain'), true);
 });
 
@@ -107,7 +107,7 @@ test('a hole in hourly wind coverage cannot be filled by a distant sample', () =
     positionTime = ${when + 3600000}; Date.now = () => ${when + 3660000};
     openMeteoWeather.fetchedAt.set('0.00,0.00', Date.now()); readState()`);
   assert.equal(run('positionTime'), when + 3600000);
-  assert.equal(run('sim.lon'), 0);
+  assert.equal(run('confirmedPosition.lon'), 0);
   assert.equal(run('sim.positionUncertain'), true);
 });
 
@@ -132,7 +132,7 @@ test('incomplete wind is retried once per minute without discarding the checkpoi
   await settle();
   assert.equal(requests, 2);
   assert.equal(run('positionTime'), when);
-  assert.equal(run('sim.lon'), 0);
+  assert.equal(run('confirmedPosition.lon'), 0);
 });
 
 test('position uncertainty is visible even when current wind has recovered', () => {
@@ -142,7 +142,7 @@ test('position uncertainty is visible even when current wind has recovered', () 
     sim.positionUncertain = true; sim.flightAvailable = true; sim.drift = 12;`);
   const display = script.slice(script.indexOf('    el.latlon.title ='), script.indexOf('    const scored =', script.indexOf('    el.latlon.title =')));
   run(display);
-  assert.match(run('el.drift.textContent'), /position uncertain/);
+  assert.match(run('el.drift.textContent'), /estimated position/);
   assert.match(run('el.latlon.title'), /2026-09-14T12:00:00/);
   run('sim.positionUncertain = false');
   run(display);

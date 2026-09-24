@@ -48,6 +48,6 @@ test('incomplete or invalid daytime radiation and overhead cloud data remains un
     'hourly.shortwave_radiation[12] = -1', 'hourly.time.pop()']) {
     const run = radiationForecast();
     run(mutation);
-    assert.equal(run('Number.isNaN(readState().dli)'), true, mutation);
+    assert.equal(run('Number.isNaN(pressureWeatherAt(sim.lat, sim.lon, gameNow()).shortwave_radiation_sum)'), true, mutation);
   }
 });

@@ -23,22 +23,22 @@ test('surface drift south of Hawaii catches up using forecast wind along the ent
   run(`sim.lat = 18.01; sim.lon = -154.28; readState()`);
   const end = when + 8 * 3600000;
   run(`Date.now = () => ${end}; readState()`);
-  assert.equal(run('sim.lon'), -154.28, 'missing initial forecast must not cause simulated eastward drift');
+  assert.equal(run('confirmedPosition.lon'), -154.28, 'missing initial forecast must not confirm simulated drift');
   assert.equal(run('positionTime'), when, 'elapsed time must be retained while waiting for forecasts');
   let previousLon = -154.28;
   for (let i = 0; i < 1000 && run('positionTime') < end; i++) {
     await new Promise(resolve => setImmediate(resolve));
     run('readState()');
-    assert.ok(run('sim.lon') <= previousLon, 'every catch-up step must travel west with the supplied wind');
-    previousLon = run('sim.lon');
+    assert.ok(run('confirmedPosition.lon') <= previousLon, 'every catch-up step must travel west with the supplied wind');
+    previousLon = run('confirmedPosition.lon');
   }
   assert.equal(run('positionTime'), end);
   assert.ok(requests > 1);
-  assert.ok(run('sim.lon < -156 && sim.lat < 18.01'));
+  assert.ok(run('confirmedPosition.lon < -156 && confirmedPosition.lat < 18.01'));
   assert.ok(run('positionTrail.every((point, i) => i === 0 || point.lon <= positionTrail[i - 1].lon)'));
 });
 
-test('unavailable surface flight data pauses drift without using simulated wind', () => {
+test('unavailable surface wind keeps the confirmed checkpoint while displaying an estimate', () => {
   for (const mutation of ['openMeteoWeather.cache.clear()', 'daily.time = [0]',
     'delete hourly.wind_speed_10m', 'hourly.wind_speed_10m[0] = -1',
     'hourly.wind_direction_10m[0] = null', 'hourly.wind_direction_10m[0] = 361']) {
@@ -46,9 +46,10 @@ test('unavailable surface flight data pauses drift without using simulated wind'
     forecast(run, 27, 62);
     run(mutation);
     run(`readState(); Date.now = () => ${when + 60000}; readState()`);
-    assert.equal(run('sim.lon'), 0, mutation);
-    assert.equal(run('sim.lat'), 0, mutation);
-    assert.equal(run('sim.flightAvailable'), false, mutation);
+    assert.equal(run('confirmedPosition.lon'), 0, mutation);
+    assert.notEqual(run('sim.lon'), 0, mutation);
+    assert.equal(run('confirmedPosition.lat'), 0, mutation);
+    assert.equal(run('sim.weatherEstimated'), true, mutation);
   }
 });
 
@@ -80,7 +81,7 @@ test('overnight 1000 hPa movement retains elapsed time while fetching wind along
   }
   assert.equal(run('positionTime'), end);
   assert.ok(requests > 1);
-  assert.ok(Math.abs(run('sim.lon * Math.PI / 180 * 6371') - 192) < 1e-7);
+  assert.ok(Math.abs(run('confirmedPosition.lon * Math.PI / 180 * 6371') - 192) < 1e-7);
 });
 
 test('selecting another pressure level changes drift to that level wind', () => {
@@ -125,7 +126,7 @@ test('switching levels settles elapsed movement using the previous wind', () => 
   assert.ok(Math.abs(run('sim.lon') * Math.PI / 180 * 6371 - 0.4) < 1e-8);
 });
 
-test('unavailable flight data pauses drift without borrowing surface or neighbouring winds', () => {
+test('unavailable level wind keeps the confirmed checkpoint and labels generated movement', () => {
   for (const mutation of ['delete hourly.wind_speed_850hPa',
     'hourly.wind_direction_850hPa[0] = null', 'hourly.wind_speed_850hPa[0] = -1',
     'hourly.geopotential_height_850hPa[0] = null', 'openMeteoWeather.cache.clear()']) {
@@ -133,10 +134,11 @@ test('unavailable flight data pauses drift without borrowing surface or neighbou
     forecast(run, 24, 270);
     run(mutation);
     run(`selectPressureLevel(850); Date.now = () => ${when + 60000}; readState()`);
-    assert.equal(run('sim.lon'), 0);
-    assert.equal(run('sim.lat'), 0);
-    assert.equal(run('sim.flightAvailable'), false);
-    assert.equal(run('sim.alt'), null);
+    assert.equal(run('confirmedPosition.lon'), 0);
+    assert.equal(run('confirmedPosition.lat'), 0);
+    assert.equal(run('sim.weatherEstimated'), true);
+    assert.ok(run('Number.isFinite(sim.alt)'));
+    assert.equal(run('flightAt(0, 0, Date.now(), 850)'), null);
   }
 });
 

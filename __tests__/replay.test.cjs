@@ -61,15 +61,15 @@ test('speed changes and pause preserve game time and weather cache uses real tim
   assert.equal(run('sim.flightAvailable'), true);
 });
 
-test('unavailable archived wind holds game time and retries on real time', async () => {
+test('unavailable archived wind uses estimates while retries stay on real time', async () => {
   let requests = 0;
   const run = replay(async () => { requests++; throw Error('offline'); });
   assert.equal(run('readState().now'), start);
   run('setReplaySpeed(1440)');
   run(`Date.now = () => ${when + 1000}; readState()`);
   await settle();
-  assert.equal(run('readState().now'), start);
-  assert.equal(run('Number.isNaN(readState().temp)'), true);
+  assert.equal(run('readState().now'), start + 1440000);
+  assert.equal(run('readState().wx.estimated'), true);
   run(`Date.now = () => ${when + 2000}; readState()`);
   await settle();
   assert.equal(requests, 1);

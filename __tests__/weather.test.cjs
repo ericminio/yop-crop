@@ -66,8 +66,8 @@ test('crop thermal and moisture conditions follow the selected pressure level', 
   assert.ok(Math.abs(run('readState().vpd') - 0.413) < 0.001);
   assert.ok(run('readState().vpd') < warmVpd);
   assert.equal(run('readState().wx.cloud_cover'), 60);
-  assert.equal(run('Number.isNaN(readState().et0)'), true);
-  assert.equal(run('Number.isNaN(readState().dli)'), true);
+  assert.equal(run('Number.isNaN(pressureWeatherAt(sim.lat, sim.lon, gameNow()).et0_fao_evapotranspiration)'), true);
+  assert.equal(run('Number.isNaN(pressureWeatherAt(sim.lat, sim.lon, gameNow()).shortwave_radiation_sum)'), true);
   run(script.slice(script.indexOf('  function dayMs('), script.indexOf('  const canvas =')));
   run('sown[0] = 0');
   const coolRate = run('tracksFor(0, 0, 0, 0, 2)[0].rate[0]');
@@ -82,14 +82,14 @@ test('missing pressure-level crop data never falls back to surface weather', () 
   const run = app('open-meteo');
   forecast(run);
   run('selectPressureLevel(850); delete hourly.temperature_850hPa; delete hourly.relative_humidity_850hPa');
-  assert.equal(run('Number.isNaN(readState().temp)'), true);
-  assert.equal(run('Number.isNaN(readState().vpd)'), true);
-  assert.equal(run('Number.isNaN(axesOf(readState().wx, {tBase: 5}).gddRate)'), true);
+  assert.equal(run('Number.isNaN(pressureWeatherAt(sim.lat, sim.lon, gameNow()).temperature_2m)'), true);
+  assert.equal(run('Number.isNaN(pressureWeatherAt(sim.lat, sim.lon, gameNow()).vapour_pressure_deficit)'), true);
+  assert.equal(run('Number.isNaN(axesOf(pressureWeatherAt(sim.lat, sim.lon, gameNow()), {tBase: 5}).gddRate)'), true);
   run('openMeteoWeather.cache.clear()');
-  assert.equal(run('Number.isNaN(readState().temp)'), true);
+  assert.equal(run('Number.isNaN(pressureWeatherAt(sim.lat, sim.lon, gameNow()).temperature_2m)'), true);
 });
 
-test('failed refresh retains the cache but stops using expired wind and waits a minute before retrying', async () => {
+test('failed refresh retains cached wind as an estimate and waits a minute before retrying', async () => {
   for (const failure of ['network', 'http', 'invalid body']) {
     let requests = 0;
     const run = app('open-meteo', async () => {
@@ -105,7 +105,8 @@ test('failed refresh retains the cache but stops using expired wind and waits a 
     };
     await prime();
     run('readState()');
-    assert.equal(run('sim.drift'), 0);
+    assert.equal(run('sim.drift'), 12);
+    assert.equal(run('sim.weatherEstimated'), true);
     run(`Date.now = () => ${when + 59999}`);
     await prime();
     assert.equal(requests, 1);
@@ -168,15 +169,15 @@ test('calm wind remains zero', () => {
   assert.equal(run('sim.drift'), 0);
 });
 
-test('missing coverage or invalid wind leaves the flight heading unavailable', () => {
+test('missing coverage or invalid wind supplies an explicitly estimated heading', () => {
   for (const mutation of [null, 'hourly.wind_speed_10m[0] = null',
     'delete hourly.wind_direction_10m', 'hourly.wind_speed_10m[0] = -1',
     'hourly.wind_direction_10m[0] = NaN', 'daily.time = [0]']) {
     const run = app('open-meteo');
     if (mutation) { forecast(run); run(mutation); }
     run('readState()');
-    assert.equal(run('sim.flightAvailable'), false);
-    assert.equal(run('sim.drift'), 0);
+    assert.equal(run('sim.weatherEstimated'), true);
+    assert.ok(run('sim.drift') > 0);
   }
 });
 
