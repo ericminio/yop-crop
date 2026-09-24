@@ -111,7 +111,7 @@ test('a hole in hourly wind coverage cannot be filled by a distant sample', () =
   assert.equal(run('sim.positionUncertain'), true);
 });
 
-test('incomplete wind is retried once per minute without discarding the checkpoint', async () => {
+test('incomplete wind is retried every 15 seconds without discarding the checkpoint', async () => {
   let requests = 0;
   const fixture = app('open-meteo');
   cached(fixture);
@@ -125,10 +125,10 @@ test('incomplete wind is retried once per minute without discarding the checkpoi
   run(`readState(); hourly.wind_speed_10m = [null, null]; Date.now = () => ${when + 60000}; readState()`);
   await settle();
   assert.equal(requests, 1);
-  run(`Date.now = () => ${when + 119999}; readState(); readState()`);
+  run(`Date.now = () => ${when + 74999}; readState(); readState()`);
   await settle();
   assert.equal(requests, 1);
-  run(`Date.now = () => ${when + 120000}; readState()`);
+  run(`Date.now = () => ${when + 75000}; readState()`);
   await settle();
   assert.equal(requests, 2);
   assert.equal(run('positionTime'), when);

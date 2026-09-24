@@ -83,7 +83,7 @@ test('unavailable archived wind uses estimates while retries stay on real time',
   run(`Date.now = () => ${when + 2000}; readState()`);
   await settle();
   assert.equal(requests, 1);
-  run(`Date.now = () => ${when + 61000}; readState()`);
+  run(`Date.now = () => ${when + 16000}; readState()`);
   await settle();
   assert.equal(requests, 2);
 });

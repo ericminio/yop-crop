@@ -584,6 +584,7 @@
     fetchedAt: new Map(),
     revision: 0,
     refreshMs: 15 * 60000,
+    retryMs: 15000,
     retryAt: 0,
     pending: false,
     coordinate: function (value, when = gameNow()) { return replayClock || usesArchive(when) ? Math.round(value * 4) / 4 : value; },
@@ -604,7 +605,7 @@
       const keys = miss.map(function (pt) { return self.key(pt.lat, pt.lon, when); });
       const historical = usesArchive(when);
       this.pending = true;
-      this.retryAt = now + 60000;
+      this.retryAt = now + this.retryMs;
       const historyDays = replayClock ? Math.max(pastDays || 1, (when - missionStartedAt) / 86400000 + 2) : pastDays || 1;
       const liveOffset = replayClock && !historical ? (now - when) / 86400000 : 0;
       const back = Math.max(1, Math.min(92, Math.ceil(historyDays + liveOffset)));
@@ -647,11 +648,11 @@
               loaded++;
             }
           });
-          self.retryAt = loaded === miss.length ? 0 : Date.now() + 60000;
+          self.retryAt = loaded === miss.length ? 0 : Date.now() + self.retryMs;
           self.pending = false;
         })
         .catch(function () {
-          self.retryAt = Date.now() + 60000;
+          self.retryAt = Date.now() + self.retryMs;
           self.pending = false;
         })
         .finally(function () { clearTimeout(timer); });
@@ -961,7 +962,7 @@
           const missingTime = flight ? positionTime + dt : positionTime;
           const fetched = weather.fetchedAt.get(weather.key(sim.lat, sim.lon, missingTime));
           const real = Date.now();
-          if (real >= weather.retryAt && (!Number.isFinite(fetched) || real - fetched >= 60000)) {
+          if (real >= weather.retryAt && (!Number.isFinite(fetched) || real - fetched >= weather.retryMs)) {
             weather.prime([{ lat: sim.lat, lon: sim.lon }], (now - positionTime) / 86400000 + 2, true, missingTime);
           }
         }

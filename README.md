@@ -202,6 +202,10 @@ steps using weather along the route. Open-Meteo reconstruction retains elapsed
 time for unavailable wind while the displayed position continues provisionally. Reloading starts a new session;
 the flight path and selected level are not persisted.
 
+Failed weather requests retry automatically after 15 real seconds, including
+while replay is paused. Manual retry skips this delay. Request timeouts remain
+45 seconds for historical weather and 15 seconds for live forecasts.
+
 Crop cycles remain visible through weather outages. Missing daily growth rates
 reuse the preceding outlook at the same flight level; days without prior data
 use the altitude-adjusted seasonal model. Amber dashed outlines mark provisional

@@ -90,7 +90,7 @@ test('missing pressure-level crop data never falls back to surface weather', () 
   assert.equal(run('Number.isNaN(pressureWeatherAt(sim.lat, sim.lon, gameNow()).temperature_2m)'), true);
 });
 
-test('failed refresh retains cached wind as an estimate and waits a minute before retrying', async () => {
+test('failed refresh retains cached wind as an estimate and waits 15 seconds before retrying', async () => {
   for (const failure of ['network', 'http', 'invalid body']) {
     let requests = 0;
     const run = app('open-meteo', async () => {
@@ -108,10 +108,10 @@ test('failed refresh retains cached wind as an estimate and waits a minute befor
     run('readState()');
     assert.equal(run('sim.drift'), 12);
     assert.equal(run('sim.weatherEstimated'), true);
-    run(`Date.now = () => ${when + 59999}`);
+    run(`Date.now = () => ${when + 14999}`);
     await prime();
     assert.equal(requests, 1);
-    run(`Date.now = () => ${when + 60000}`);
+    run(`Date.now = () => ${when + 15000}`);
     await prime();
     assert.equal(requests, 2);
     assert.equal(run('flightAt(0, 0, Date.now())'), null);
