@@ -93,8 +93,24 @@
   .flight-control label, .flight-control span { font-size: 8px; color: var(--dim);
     letter-spacing: 0.06em; white-space: nowrap; }
   .flight-control label { color: var(--cyan); text-transform: uppercase; }
-  #pressure-level { writing-mode: vertical-lr; direction: rtl; flex: 1; min-height: 0;
-    width: 30px; margin: 0; cursor: ns-resize; accent-color: var(--cyan); }
+  .flight-track { position: relative; flex: 1; min-height: 0; width: 48px; }
+  #flight-winds { position: absolute; inset: 8px 0; pointer-events: none; }
+  .flight-wind { position: absolute; left: -4px; width: 24px; height: 24px;
+    max-height: calc(100% / 19); overflow: visible; transform: translateY(50%);
+    color: var(--dim); pointer-events: auto; }
+  .flight-wind[data-side="right"] { left: auto; right: -4px; }
+  .flight-wind.selected { color: var(--cyan); }
+  #pressure-level { writing-mode: vertical-lr; direction: rtl; min-height: 0;
+    position: absolute; top: 0; left: 13px; height: 100%;
+    appearance: none; background: transparent; width: 22px; margin: 0; cursor: ns-resize; }
+  #pressure-level::-webkit-slider-runnable-track { width: 4px; border-radius: 2px;
+    background: linear-gradient(to top, var(--cyan) var(--flight-fill), var(--edge) var(--flight-fill)); }
+  #pressure-level::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px;
+    margin-left: -6px; border-radius: 50%; background: var(--cyan); }
+  #pressure-level::-moz-range-track { width: 4px; border-radius: 2px;
+    background: linear-gradient(to top, var(--cyan) var(--flight-fill), var(--edge) var(--flight-fill)); }
+  #pressure-level::-moz-range-thumb { width: 16px; height: 16px; border: 0;
+    border-radius: 50%; background: var(--cyan); }
   #pressure-level:focus-visible { outline: 1px solid var(--cyan); outline-offset: 3px; }
   #pressure-level:disabled { opacity: 0.35; cursor: default; }
   #position > .ttl, #position > .body { margin-right: 51px; }
@@ -378,7 +394,10 @@
       <div class="flight-control">
         <label for="pressure-level">Level</label>
         <span aria-hidden="true">30 hPa</span>
-        <input id="pressure-level" type="range" min="0" value="0" step="1" aria-orientation="vertical" aria-label="Flight pressure level">
+        <div class="flight-track">
+          <div id="flight-winds" role="group" aria-label="Wind by flight level; arrows point toward drift, longer arrows mean stronger wind"></div>
+          <input id="pressure-level" type="range" min="0" value="0" step="1" aria-orientation="vertical" aria-label="Flight pressure level">
+        </div>
         <span aria-hidden="true">Surface</span>
       </div>
       <div class="ttl"><span class="lhs"><span class="chev">&#9662;</span>Position</span>
@@ -996,6 +1015,25 @@
     return { speed: speed, direction: direction, altitude: altitude };
   }
 
+  function flightWindMarkup(when) {
+    return [null, ...PRESSURE_LEVELS].map(function (level, index) {
+      const wind = flightAt(sim.lat, sim.lon, when, level);
+      const label = level === null ? 'surface' : level + ' hPa';
+      const bearing = wind ? Math.round((wind.direction + 180) % 360) % 360 : null;
+      const side = wind && wind.speed > 0 && bearing > 0 && bearing <= 180 ? 'right' : 'left';
+      const length = !wind || wind.speed === 0 ? 0 : wind.speed < 15 ? 6 : wind.speed < 40 ? 10 : 14;
+      const description = label + ': ' + (!wind ? 'wind unavailable' : wind.speed === 0 ? 'calm' :
+        'toward ' + bearing + '°, ' + Math.round(wind.speed) + ' km/h');
+      const shape = !wind ? '<path d="M9 12h6"/>' : wind.speed === 0 ? '<circle cx="12" cy="12" r="2"/>' :
+        '<path transform="rotate(' + bearing + ' 12 12)" d="M12 ' + (12 + length / 2) +
+        'V' + (12 - length / 2) + 'm-3 3 3-3 3 3"/>';
+      return '<svg class="flight-wind' + (level === pressureLevel ? ' selected' : '') + '" data-level="' +
+        (level === null ? 'surface' : level) + '" style="bottom:' + (index / PRESSURE_LEVELS.length * 100) +
+        '%" viewBox="0 0 24 24" role="img" data-side="' + side + '" data-length="' + length + '"><title>' + description +
+        '</title><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + shape + '</g></svg>';
+    }).join('');
+  }
+
   function selectPressureLevel(level) {
     if (level !== null && !PRESSURE_LEVELS.includes(level)) throw new RangeError('Unknown pressure level');
     advancePosition(gameNow());
@@ -1174,6 +1212,7 @@
   const outlook = { key: null, rows: [], pending: [], origin: null, preview: null };
   const ROUTE_HOURS = 12;
   let guidanceCrop = null;
+  let weatherGuidancePaused = true;
 
   function guidanceCropIndex() {
     return guidanceCrop ?? Math.max(0, sown.findIndex(day => day !== null));
@@ -1235,6 +1274,7 @@
   }
 
   function primeRouteWeather(missionDay) {
+    if (weatherGuidancePaused) return;
     if (weather !== openMeteoWeather || weather.pending || !outlook.pending.length) return;
     const groups = new Map();
     for (const point of outlook.pending) {
@@ -2275,6 +2315,18 @@
 
   let guidanceMarkup = '';
   function renderWeatherGuidance(st, phase, refDays, phases = [], cropIndex = guidanceCropIndex()) {
+    if (weatherGuidancePaused) {
+      document.getElementById('guidance-crop').disabled = true;
+      document.getElementById('weather-need').textContent = '';
+      document.getElementById('route-note').textContent = 'Paused to save weather requests.';
+      el.candtag.textContent = 'Paused';
+      el.candlist.innerHTML = '';
+      guidanceMarkup = '';
+      outlook.pending = [];
+      outlook.rows = [];
+      outlook.preview = null;
+      return;
+    }
     document.getElementById('guidance-crop').value = String(cropIndex);
     document.getElementById('weather-need').textContent = weatherNeed(st.wx, phase, CROPS[cropIndex]);
     const rows = weatherRoutes(sim.lat, sim.lon, st.now, phase, refDays, cropIndex);
@@ -2308,6 +2360,7 @@
   }
 
   el.candlist.addEventListener('click', function (event) {
+    if (weatherGuidancePaused) return;
     const button = event.target.closest('button');
     if (!button || button.disabled || sim.positionUncertain || sim.weatherEstimated) return;
     const preview = button.dataset.preview;
@@ -2390,6 +2443,9 @@
   }
 
   function updateHUD(st, markDay, tracks, endDay) {
+    const winds = document.getElementById('flight-winds');
+    const windMarkup = flightWindMarkup(st.now);
+    if (winds.innerHTML !== windMarkup) winds.innerHTML = windMarkup;
     const d = st.d;
     el.clock.textContent = pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes())+':'+
                            pad2(d.getUTCSeconds())+' UTC';
@@ -2685,6 +2741,8 @@
   levelControl.title = levelControl.disabled ? 'Flight levels require ?weather=open-meteo' : 'Wind and crop weather at this pressure level; altitude above sea level';
   function syncFlightLevel() {
     const label = pressureLevel === null ? 'surface' : pressureLevel + ' hPa';
+    const fraction = Number(levelControl.value) / PRESSURE_LEVELS.length;
+    levelControl.style.setProperty('--flight-fill', 'calc(' + (fraction * 100) + '% + ' + (8 - fraction * 16) + 'px)');
     document.getElementById('flight-level-value').textContent = label;
     levelControl.setAttribute('aria-valuetext', label);
   }

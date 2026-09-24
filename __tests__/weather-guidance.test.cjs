@@ -4,10 +4,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { app, script } = require('./app-helper.cjs');
 
-function planner() {
+function planner(paused = false) {
   const run = app('open-meteo');
   run(script.slice(script.indexOf('  function dayMs('), script.indexOf('  function tracksFor(')));
   run(script.slice(script.indexOf('  function bandMiss('), script.indexOf("  el.candlist.addEventListener('click'")));
+  if (!paused) run('if (typeof weatherGuidancePaused !== "undefined") weatherGuidancePaused = false');
   run(`
     const good = { temperature_2m_min: 15, temperature_2m_max: 24,
       shortwave_radiation_sum: 20, daylight_duration: 43200, vapour_pressure_deficit: 0.8 };
@@ -18,6 +19,27 @@ function planner() {
   `);
   return run;
 }
+
+test('weather guidance is paused by default and neither searches routes nor fetches their weather', () => {
+  const run = planner(true);
+  run(`
+    const elements = {};
+    const document = {getElementById: id => elements[id] ||= {}};
+    const el = {candlist: {innerHTML: ''}, candtag: {textContent: ''}};
+    let routeSearches = 0;
+    let requests = 0;
+    weatherRoutes = () => { routeSearches++; return []; };
+    weather.prime = () => { requests++; };
+    outlook.pending = [{lat: 1, lon: 1, time: Date.now()}];
+    primeRouteWeather(0);
+    renderWeatherGuidance({wx: good, now: Date.now()}, CROPS[0].need[0], 15);
+  `);
+  assert.equal(run('requests'), 0, 'paused guidance must not request destination forecasts');
+  assert.equal(run('routeSearches'), 0, 'paused guidance must not plan routes');
+  assert.equal(run("elements['guidance-crop'].disabled"), true);
+  assert.match(run("elements['route-note'].textContent"), /Paused/);
+  assert.equal(run('el.candlist.innerHTML'), '');
+});
 
 test('weather guidance replaces the fixed relocation destinations with route actions', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
