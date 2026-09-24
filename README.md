@@ -61,7 +61,15 @@ provisional weather and position; **Correcting route** indicates recovery.
 
 Open-Meteo forecasts are the default, so the flight level selector is enabled
 without a URL parameter. Open `index.html?weather=simulated` to use generated
-weather, including wind; flight level selection is disabled in simulated mode.
+weather, including winds at every flight level. The slider works in simulated
+mode, with stronger winds and changing directions across levels for previewing
+the arrows and drift without API calls. These winds are illustrative; simulated
+crop weather retains its existing behavior.
+Each flight-level slider stop shows an arrow pointing toward the wind-driven
+drift (north is up). Short, medium and long arrows indicate winds below 15,
+15–39 and at least 40 km/h. Hover an arrow for its level, bearing and speed;
+a circle means calm and a dash means unavailable. The selected level is cyan.
+Arrows sit on the side they point toward; exactly up sits left and exactly down sits right.
 Open-Meteo uses simulated crop conditions as the fallback when surface forecast
 coverage is unavailable.
 During an outage, drift and heading use cached or last known wind at the selected
@@ -140,7 +148,12 @@ thermal growth and crop needs. Switching levels recalculates crop tracks and
 weather guidance at that level. Tracks are scenarios for the currently selected
 level, not a persisted history of previously flown levels.
 
-The **Find better weather** panel explains the selected crop’s current phase needs
+The **Find better weather** panel is currently paused to conserve API quota.
+It does not search routes or fetch destination forecasts, and its controls are
+disabled. Weather for the platform's actual position and the flight-level wind
+arrows continue to work. The behavior described below is retained for future use.
+
+When enabled, the panel explains the selected crop’s current phase needs
 (or establishment needs before sowing). The crop selector defaults to the first
 planted crop, or potato when none is planted, and remembers an explicit selection
 for the session. Routes flag drops of five or more fit points for other planted
