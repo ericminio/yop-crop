@@ -242,7 +242,7 @@
             <p>Fly through past weather. Historical conditions stand in for the forecast, including the days ahead.</p>
             <label for="replay-start">Start time (UTC)</label>
             <input id="replay-start" type="datetime-local" required min="2022-01-01T00:00">
-            <p>Available from January 2022. Starts paused at your current location. Starting a mission clears crops and the flight trail.</p>
+            <p>Available from January 2022. Starts paused here; switches to live time when it reaches the present. Starting a mission clears crops and the flight trail.</p>
             <div class="actions"><button type="submit">Start new mission</button>
               <button type="button" id="replay-live">Return to live</button></div>
           </form>
@@ -409,14 +409,18 @@
   const replayInput = new URLSearchParams(location.search).get('replay');
   const replayStart = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(replayInput || '')
     ? Date.parse(replayInput + 'Z') : NaN;
-  const replayClock = Number.isFinite(replayStart) && replayStart >= REPLAY_MIN && replayStart <= Date.now() - 86400000
+  let replayClock = Number.isFinite(replayStart) && replayStart >= REPLAY_MIN && replayStart <= Date.now()
     ? { time: replayStart, speed: 0, lastReal: Date.now(), waiting: false } : null;
 
+  let replayCompleted = false;
+
   function gameNow() { return replayClock ? replayClock.time : Date.now(); }
+  function usesArchive(when) { return !!replayClock && when < Date.now() - 5 * 86400000; }
   function utcDate(when) { return new Date(when).toISOString().slice(0, 10); }
   function setReplaySpeed(speed) {
     if (!replayClock || ![0, 1, 60, 360, 1440].includes(speed)) return;
     readState();
+    if (!replayClock) return;
     replayClock.speed = speed;
     replayClock.lastReal = Date.now();
   }
@@ -424,11 +428,22 @@
     const real = Date.now();
     const elapsed = Math.max(0, Math.min(1000, real - replayClock.lastReal));
     replayClock.lastReal = real;
-    const target = Math.min(real - 86400000, replayClock.time + elapsed * replayClock.speed);
+    const target = Math.min(real, replayClock.time + elapsed * replayClock.speed);
     advancePosition(target);
     replayClock.waiting = positionTime < target;
     replayClock.time = positionTime;
-    if (replayClock.time >= real - 86400000) replayClock.speed = 0;
+    if (replayClock.time >= real) {
+      const key = openMeteoWeather.key(sim.lat, sim.lon);
+      const row = openMeteoWeather.cache.get(key);
+      const fetched = openMeteoWeather.fetchedAt.get(key);
+      replayClock = null;
+      replayCompleted = true;
+      if (row) {
+        const liveKey = openMeteoWeather.key(sim.lat, sim.lon);
+        openMeteoWeather.cache.set(liveKey, row);
+        openMeteoWeather.fetchedAt.set(liveKey, fetched);
+      }
+    }
   }
 
   let missionStartedAt = gameNow();
@@ -563,7 +578,7 @@
     coordinate: function (value) { return replayClock ? Math.round(value * 4) / 4 : value; },
     key: function (lat, lon, when = gameNow()) {
       const locationKey = this.coordinate(lat).toFixed(2) + ',' + this.coordinate(lon).toFixed(2);
-      return replayClock ? locationKey + '@' + utcDate(when) : locationKey;
+      return replayClock ? locationKey + '@' + (usesArchive(when) ? 'history:' : 'forecast:') + utcDate(when) : locationKey;
     },
     prime: function (points, pastDays, force, when = gameNow()) {
       const now = Date.now();
@@ -572,15 +587,16 @@
       const miss = points.filter(function (pt) {
         const key = self.key(pt.lat, pt.lon, when);
         return force || !self.cache.has(key) || !self.fetchedAt.has(key) ||
-          (!replayClock && now - self.fetchedAt.get(key) >= self.refreshMs);
+          (!usesArchive(when) && now - self.fetchedAt.get(key) >= self.refreshMs);
       });
       if (!miss.length) return;
       const keys = miss.map(function (pt) { return self.key(pt.lat, pt.lon, when); });
-      const historical = !!replayClock;
+      const historical = usesArchive(when);
       this.pending = true;
       this.retryAt = now + 60000;
-      const historyDays = historical ? Math.max(pastDays || 1, (when - missionStartedAt) / 86400000 + 2) : pastDays || 1;
-      const back = Math.max(1, Math.min(92, Math.ceil(historyDays)));
+      const historyDays = replayClock ? Math.max(pastDays || 1, (when - missionStartedAt) / 86400000 + 2) : pastDays || 1;
+      const liveOffset = replayClock && !historical ? (now - when) / 86400000 : 0;
+      const back = Math.max(1, Math.min(92, Math.ceil(historyDays + liveOffset)));
       const controller = new AbortController();
       let timer;
       const timeout = new Promise(function (_, reject) {
@@ -795,7 +811,7 @@
     const key = openMeteoWeather.key(lat, lon, when);
     const row = weather === openMeteoWeather && openMeteoWeather.cache.get(key);
     const fetched = openMeteoWeather.fetchedAt.get(key);
-    if (!Number.isFinite(fetched) || (!replayClock && Date.now() - fetched >= openMeteoWeather.refreshMs)) return null;
+    if (!Number.isFinite(fetched) || (!usesArchive(when) && Date.now() - fetched >= openMeteoWeather.refreshMs)) return null;
     if (!row || !openMeteoWeather.covers(row, when)) return null;
     const times = row.hourly.time, sec = when / 1000;
     if (sec < times[0] || sec > times[times.length - 1]) return null;
@@ -2144,10 +2160,21 @@
 
   function frame(now) {
     const st = readState();
-    if (replayClock) {
-      document.getElementById('replay-speed').value = replayClock.speed;
-      document.getElementById('replay-state').textContent = replayClock.waiting ? 'Waiting for weather' : 'Hindsight';
+    if (replayCompleted) {
+      const query = new URLSearchParams(location.search);
+      query.delete('replay');
+      query.delete('weather');
+      query.set('lat', sim.lat.toFixed(4));
+      query.set('lon', sim.lon.toFixed(4));
+      history.replaceState(null, '', '?' + query.toString());
+      document.getElementById('sim').textContent = weatherNote();
+      replayCompleted = false;
     }
+    document.getElementById('replay-speed').hidden = !replayClock;
+    document.getElementById('replay-live').hidden = !replayClock;
+    document.getElementById('replay-speed').value = replayClock ? replayClock.speed : 0;
+    document.getElementById('replay-state').textContent = !replayClock ? 'Live'
+      : replayClock.waiting ? 'Waiting for weather' : usesArchive(st.now) ? 'Hindsight' : 'Catching up';
     const markDay = scrub === null ? st.missionDay : scrub;
     if (Number.isFinite(st.wx.cloud_cover)) sim.cloud = st.wx.cloud_cover / 100;
     weather.prime(scoringPoints(), st.missionDay + 2);
@@ -2196,7 +2223,7 @@
   }
 
   function weatherNote() {
-    if (replayClock) return 'historical weather replay · hindsight forecast · GFS';
+    if (replayClock) return usesArchive(gameNow()) ? 'historical weather replay · hindsight forecast · GFS' : 'replay catching up · live forecast';
     return (weather === simulatedWeather ? 'simulated conditions' : 'open-meteo forecast') +
            (pressureLevel === null ? ' \u00b7 mission clock is real \u00b7 drifting with wind'
              : ' \u00b7 ' + pressureLevel + ' hPa wind & crop weather \u00b7 light & water demand estimated');
@@ -2204,7 +2231,7 @@
 
   function setupReplayControls() {
     const input = document.getElementById('replay-start');
-    input.max = new Date(Date.now() - 86400000).toISOString().slice(0, 16);
+    input.max = new Date(Date.now()).toISOString().slice(0, 16);
     input.value = replayClock ? new Date(missionStartedAt).toISOString().slice(0, 16)
       : utcDate(Date.now() - 30 * 86400000) + 'T12:00';
     const speed = document.getElementById('replay-speed');

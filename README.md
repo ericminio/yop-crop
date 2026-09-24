@@ -19,8 +19,9 @@ clears sowing dates and the route. The date is kept in the URL; reloading starts
 that replay again, paused.
 
 For example, `?replay=2022-01-01T12:00&lat=48.85&lon=2.35` starts over Paris.
-Dates range from January 1, 2022 to 24 hours before the present. Replay stops at
-that upper bound. Mission days, drift, weather, sunlight and crop timing all use
+Dates range from January 1, 2022 to the present. When the clock catches up with
+the present, it automatically continues in real time without resetting the
+mission, sowing dates or route. The URL also returns to live mode. Mission days, drift, weather, sunlight and crop timing all use
 the replay clock. Returning from a suspended tab advances at most one real
 second's worth of simulation instead of catching up the entire absence.
 
@@ -32,9 +33,14 @@ at that time, and not direct observations at every point. The
 provides the existing surface and pressure-level fields. Missing data, including
 beyond the archive, remains unavailable.
 
+Within five days of the present, replay uses the live forecast endpoint and its
+recent history so archive publication delays cannot block the handoff. Its
+forecast outlook then follows the live forecast window; the label changes to
+**Catching up**.
+
 Replay weather is requested on a 0.25° coordinate grid to reuse nearby weather
 while moving quickly. Cache entries are separated by game date, and archived
-values do not expire every 15 real minutes. Requests include up to 92 prior days,
+values do not expire every 15 real minutes; recent live forecasts still do. Requests include up to 92 prior days,
 as in live mode. Network retries still use real time; archive requests time out
 after 45 seconds. The clock holds while required wind is unavailable, displays
 **Waiting for weather**, and resumes at the selected speed when data arrives.

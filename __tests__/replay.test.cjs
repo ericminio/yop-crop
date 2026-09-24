@@ -181,3 +181,49 @@ test('weather fetched along a replay route retains the mission crop history', as
   await settle();
   assert.equal(urls[0].searchParams.get('start_date'), '2026-04-01');
 });
+
+test('replay catches the present and continues live without resetting the mission', () => {
+  const nearNow = when - 60000;
+  const run = app('open-meteo', undefined, {location: {search: '?replay=' + new Date(nearNow).toISOString().slice(0, 16)}});
+  assert.equal(run('readState().now'), nearNow);
+  run(script.slice(script.indexOf('  function dayMs('), script.indexOf('  const canvas =')));
+  run('sown[0] = 0');
+  const data = row(when);
+  run(`openMeteoWeather.cache.set(openMeteoWeather.key(0, 0), ${JSON.stringify(data)});
+    openMeteoWeather.fetchedAt.set(openMeteoWeather.key(0, 0), Date.now());
+    setReplaySpeed(1440);
+    Date.now = () => ${when + 1000}`);
+  assert.equal(run('readState().now'), when + 1000);
+  assert.equal(run('replayClock'), null);
+  assert.equal(run('missionStartedAt'), nearNow);
+  assert.equal(run('sown[0]'), 0);
+  assert.equal(run('positionTime'), when + 1000);
+  run(`Date.now = () => ${when + 2000}`);
+  assert.equal(run('readState().now'), when + 2000);
+});
+
+test('replay uses the live forecast endpoint near the present', async () => {
+  const urls = [];
+  const date = new Date(when - 86400000).toISOString().slice(0, 16);
+  const run = app('open-meteo', async url => {
+    urls.push(new URL(url));
+    return {ok: true, json: async () => row(when)};
+  }, {location: {search: '?replay=' + date}});
+  await load(run);
+  assert.equal(urls[0].hostname, 'api.open-meteo.com');
+  assert.ok(Number(urls[0].searchParams.get('past_days')) >= 2);
+  assert.equal(urls[0].searchParams.has('start_date'), false);
+});
+
+test('changing speed at the handoff safely leaves the clock in live mode', () => {
+  const nearNow = when - 60000;
+  const run = app('open-meteo', undefined, {location: {search: '?replay=' + new Date(nearNow).toISOString().slice(0, 16)}});
+  const data = row(when);
+  run(`readState();
+    openMeteoWeather.cache.set(openMeteoWeather.key(0, 0), ${JSON.stringify(data)});
+    openMeteoWeather.fetchedAt.set(openMeteoWeather.key(0, 0), Date.now());
+    setReplaySpeed(1440);
+    Date.now = () => ${when + 1000}`);
+  assert.doesNotThrow(() => run('setReplaySpeed(0)'));
+  assert.equal(run('replayClock'), null);
+});
