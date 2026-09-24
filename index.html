@@ -195,6 +195,15 @@
   .cand:last-child { border-bottom: 0; }
   .cand .hd { display: flex; justify-content: space-between; align-items: baseline; }
   .cand .sc { font-size: 14px; font-variant-numeric: tabular-nums; }
+  .guidance-label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--dim); }
+  #guidance-crop { font: inherit; color: var(--ink); background: #0a1622; border: 1px solid var(--edge); padding: 5px; }
+  .tradeoff { color: var(--amber); font-size: 9px; margin-top: 5px; }
+  #weather-need { margin: 0 0 8px; line-height: 1.5; }
+  #route-note { color: var(--dim); font-size: 9px; line-height: 1.5; }
+  .route-actions { display: flex; gap: 6px; margin-top: 7px; }
+  .route-actions button { font: inherit; font-size: 9px; color: var(--cyan); background: transparent; border: 1px solid var(--edge); padding: 6px; cursor: pointer; }
+  .route-actions button:disabled { opacity: 0.45; cursor: default; }
+  .cand.recommended { border-left: 2px solid var(--green); padding-left: 8px; }
   .cand .dt { font-size: 9px; color: var(--dim); margin-top: 1px; }
 
   #tl.collapsed { height: 26px; }
@@ -261,6 +270,7 @@
     .need { padding-left: 0; grid-template-columns: 44px 1fr auto 38px; gap: 4px; }
     .cand { padding: 10px 0; }
     .cand .dt { line-height: 1.6; }
+    .route-actions button, #guidance-crop { min-height: 44px; }
     #tl { position: relative; order: 3; height: auto; }
     #tl.collapsed { height: auto; }
     #tlhead { flex-wrap: wrap; gap: 8px; padding: 8px; }
@@ -330,7 +340,7 @@
       <div class="daystrip"><div class="mk" id="mkrise"></div><div class="mk" id="mkset"></div>
         <div class="now" id="mknow"></div></div>
       <div class="dayscale" id="dayscale"><span id="risemk"><span id="rise">—</span> ↑</span>
-        <span id="sunmk"><i id="sunlab">sun </i><span id="elev">—</span>°</span>
+        <span id="sunmk" title="Sun elevation above the horizon"><i id="sunlab">sun </i><span id="elev">—</span>°</span>
         <span id="setmk">↓ <span id="set">—</span></span></div>
     </div>
     <div class="cell spacer"></div>
@@ -397,8 +407,8 @@
       </div>
     </div>
     <div class="panel" id="move">
-      <div class="ttl"><span class="lhs"><span class="chev">▾</span>Relocation candidates</span><b id="candtag">—</b></div>
-      <div class="body"><div id="candlist"></div></div>
+      <div class="ttl"><span class="lhs"><span class="chev">▾</span>Find better weather</span><b id="candtag">—</b></div>
+      <div class="body"><label class="guidance-label" for="guidance-crop">Plan for <select id="guidance-crop" aria-label="Crop for weather guidance"></select></label><p id="weather-need"></p><div id="candlist"></div><p id="route-note" class="dt"></p></div>
     </div>
   </div>
 
@@ -720,13 +730,13 @@
       return sec >= t[0] && sec < t[t.length - 1] + 86400;
     },
     horizonAt: function (lat, lon, when, now) {
-      const row = this.cache.get(this.key(lat, lon));
+      const row = this.cache.get(this.key(lat, lon, when)) || this.cache.get(this.key(lat, lon));
       if (!row || !this.covers(row, when)) return 'climatology';
       return when <= now ? 'measured' : 'forecast';
     },
-    at: function (lat, lon, when) {
-      if (pressureLevel !== null) return pressureWeatherAt(lat, lon, when);
-      const row = this.cache.get(this.key(lat, lon));
+    at: function (lat, lon, when, level = pressureLevel) {
+      if (level !== null) return pressureWeatherAt(lat, lon, when, level);
+      const row = this.cache.get(this.key(lat, lon, when)) || this.cache.get(this.key(lat, lon));
       if (!row || !this.covers(row, when)) {
         if (replayClock) return Object.fromEntries(this.hourly.concat(this.daily).map(function (field) { return [field, NaN]; }));
         const { wind_speed_10m, wind_direction_10m, ...cropWeather } = simulatedWeather.at(lat, lon, when);
@@ -752,13 +762,6 @@
   const PROVIDERS = { simulated: simulatedWeather, 'open-meteo': openMeteoWeather };
   let weather = (replayClock ? openMeteoWeather : PROVIDERS[new URLSearchParams(location.search).get('weather')]) ||
                 openMeteoWeather;
-
-  function scoringPoints() {
-    return CANDIDATES.map(function (cd) {
-      return { lat: sim.lat + cd.dLat, lon: sim.lon + cd.dLon };
-    });
-  }
-
 
   function axesOf(wx, crop) {
     return {
@@ -878,7 +881,7 @@
     }
   }
 
-  function estimatedRadiationDay(row, lat, lon, day) {
+  function estimatedRadiationDay(row, lat, lon, day, selectedLevel = pressureLevel) {
     if (!row) return NaN;
     let energy = 0;
     for (let hour = 1; hour <= 24; hour++) {
@@ -897,7 +900,7 @@
       if (!Number.isFinite(radiation) || radiation < 0 || !validCloud(surfaceCloud)) return NaN;
       let overhead = 0;
       for (const level of PRESSURE_LEVELS) {
-        if (level > pressureLevel) continue;
+        if (level > selectedLevel) continue;
         const cloud = row.hourly['cloud_cover_' + level + 'hPa']?.[i];
         if (!validCloud(cloud)) return NaN;
         overhead = Math.max(overhead, cloud);
@@ -909,10 +912,11 @@
     return energy;
   }
 
-  function pressureWeatherAt(lat, lon, when) {
-    const row = openMeteoWeather.cache.get(openMeteoWeather.key(lat, lon));
+  function pressureWeatherAt(lat, lon, when, level = pressureLevel) {
+    const row = openMeteoWeather.cache.get(openMeteoWeather.key(lat, lon, when)) ||
+      openMeteoWeather.cache.get(openMeteoWeather.key(lat, lon));
     const day = Math.floor(when / 86400000) * 86400;
-    const suffix = pressureLevel + 'hPa';
+    const suffix = level + 'hPa';
     const h = row && openMeteoWeather.covers(row, when)
       ? nearestIndex(row.hourly.time, when / 1000) : -1;
     const value = function (field) {
@@ -935,9 +939,9 @@
       const height = row?.hourly['geopotential_height_' + suffix]?.[i];
       if (Number.isFinite(height)) heights.push(height);
     }
-    const radiation = estimatedRadiationDay(row, lat, lon, day);
+    const radiation = estimatedRadiationDay(row, lat, lon, day, level);
     const et0 = temperatures.length === 24 && vapourPressures.length === 24 && heights.length === 24
-      ? zeroWindEvaporation(radiation, lat, day, temperatures, vapourPressures, heights, pressureLevel)
+      ? zeroWindEvaporation(radiation, lat, day, temperatures, vapourPressures, heights, level)
       : NaN;
     return {
       temperature_2m: temp,
@@ -1167,29 +1171,82 @@
 
   const sown = CROPS.map(function () { return null; });
 
-  const outlook = { key: null, rows: null };
+  const outlook = { key: null, rows: [], pending: [], origin: null, preview: null };
+  const ROUTE_HOURS = 12;
+  let guidanceCrop = null;
 
-  function candidateOutlooks(lat, lon, now, missionDay, endDay) {
-    const crop = CROPS[SCORE_CROP];
-    const key = [weather.name, weather.revision || 0, pressureLevel,
-                 lat.toFixed(2), lon.toFixed(2), Math.floor(missionDay), sim.drift.toFixed(2)].join('|');
+  function guidanceCropIndex() {
+    return guidanceCrop ?? Math.max(0, sown.findIndex(day => day !== null));
+  }
+
+  function weatherRoutes(lat, lon, now,
+      phase = CROPS[guidanceCropIndex()].need[0], refDays = CROPS[guidanceCropIndex()].days * SPLIT[0],
+      cropIndex = guidanceCropIndex()) {
+    const originKey = [Math.floor(now / 900000), pressureLevel, cropIndex, phase.note, weather.name].join('|');
+    if (!outlook.key || outlook.origin?.key !== originKey ||
+        Math.abs(lat - outlook.origin.lat) > 0.25 || Math.abs(wrappedLongitude(lon - outlook.origin.lon)) > 0.25) {
+      outlook.origin = { lat, lon, now, key: originKey };
+      outlook.preview = null;
+    }
+    const key = [originKey, outlook.origin.lat, outlook.origin.lon, weather.revision || 0, refDays].join('|');
     if (outlook.key === key) return outlook.rows;
     outlook.key = key;
-    outlook.rows = CANDIDATES.map(function (cd) {
-      const eta = cd.dist / Math.max(1, sim.drift);
-      const cLat = lat + cd.dLat, cLon = lon + cd.dLon;
-      const arrive = missionDay + eta / 24;
-      const tr = buildTrack(crop, arrive, cLat, cLon, arrive, arrive, endDay);
-      let harvest = null;
-      for (let i = 0; i < tr.segs.length; i++)
-        if (tr.segs[i].idx === -1) { harvest = tr.segs[i].from; break; }
-      return { eta: eta, lat: cLat, lon: cLon,
-               wx: weather.at(cLat, cLon, now + eta * 3600000),
-               usable: tr.stall === null ? Infinity : Math.max(0, tr.stall - arrive),
-               unknownFrom: tr.unknownFrom,
-               harvest: harvest };
-    });
-    return outlook.rows;
+    outlook.pending = [];
+    const crop = CROPS[cropIndex];
+    const levels = weather === openMeteoWeather ? [null, ...PRESSURE_LEVELS] : [null];
+    const rows = [];
+    for (const level of levels) {
+      let point = { lat: outlook.origin.lat, lon: outlook.origin.lon };
+      const path = [], samples = [];
+      for (let hour = 0; hour <= ROUTE_HOURS; hour++) {
+        const time = outlook.origin.now + hour * 3600000;
+        const flight = flightAt(point.lat, point.lon, time, level);
+        const wx = weather.at(point.lat, point.lon, time, level);
+        const score = wx.estimated ? NaN : fitScore(wx, crop, phase, refDays);
+        if (!flight || !Number.isFinite(score)) {
+          outlook.pending.push({ ...point, time });
+          break;
+        }
+        path.push({ ...point, time });
+        samples.push({ wx, score, hour });
+        if (hour < ROUTE_HOURS) point = movedPosition(point.lat, point.lon, flight, 3600000);
+      }
+      if (!samples.length) continue;
+      const arrival = samples.find(sample => sample.score >= 88) ||
+        samples.reduce((best, sample) => sample.score > best.score ? sample : best);
+      let suitableHours = 0;
+      if (arrival.score >= 88) {
+        for (let hour = arrival.hour + 1; hour < samples.length && samples[hour].score >= 88; hour++) suitableHours++;
+      }
+      rows.push({ level, path, forecastHours: samples.length - 1, scores: samples.map(sample => sample.score),
+        eta: arrival.hour, wx: arrival.wx, score: arrival.score, weatherSamples: samples.map(sample => sample.wx),
+        suitableHours, lat: path[arrival.hour].lat, lon: path[arrival.hour].lon });
+    }
+    const comparisonHours = rows.length ? Math.min(...rows.map(row => row.forecastHours)) : 0;
+    for (const row of rows) {
+      row.comparisonHours = comparisonHours;
+      row.meanScore = row.scores.slice(0, comparisonHours + 1).reduce((sum, score) => sum + score, 0) / (comparisonHours + 1);
+    }
+    rows.sort((a, b) => b.meanScore - a.meanScore ||
+      Number(b.level === pressureLevel) - Number(a.level === pressureLevel) || a.eta - b.eta);
+    outlook.rows = rows;
+    if (outlook.preview !== null && !rows.some(row => String(row.level) === outlook.preview)) outlook.preview = null;
+    return rows;
+  }
+
+  function primeRouteWeather(missionDay) {
+    if (weather !== openMeteoWeather || weather.pending || !outlook.pending.length) return;
+    const groups = new Map();
+    for (const point of outlook.pending) {
+      const date = utcDate(point.time);
+      if (!groups.has(date)) groups.set(date, new Map());
+      groups.get(date).set(weather.key(point.lat, point.lon, point.time), point);
+    }
+    for (const group of groups.values()) {
+      const points = [...group.values()];
+      weather.prime(points, missionDay + 2, false, points[0].time);
+      if (weather.pending) break;
+    }
   }
 
   function tracksFor(lat, lon, missionDay, fromDay, endDay) {
@@ -1939,6 +1996,23 @@
       mapLabel(Math.abs(w) + (w === 0 ? '' : w > 0 ? 'E' : 'W'), x, H - 3, GRID);
     }
 
+    const preview = outlook.rows.find(row => String(row.level) === outlook.preview);
+    if (preview && !sim.positionUncertain) {
+      mctx.strokeStyle = '#7bea9a'; mctx.lineWidth = 2; mctx.setLineDash([5, 4]);
+      mctx.beginPath();
+      let lon = cLon + wrappedLongitude(preview.path[0].lon - cLon);
+      preview.path.forEach(function (point, i) {
+        if (i) lon += wrappedLongitude(point.lon - preview.path[i - 1].lon);
+        if (i) mctx.lineTo(X(lon), Y(point.lat));
+        else mctx.moveTo(X(lon), Y(point.lat));
+      });
+      mctx.stroke(); mctx.setLineDash([]); mctx.lineWidth = 1;
+      const end = preview.path[preview.eta];
+      const endLon = cLon + wrappedLongitude(end.lon - cLon);
+      mctx.fillStyle = '#7bea9a'; mctx.beginPath(); mctx.arc(X(endLon), Y(end.lat), 4, 0, Math.PI * 2); mctx.fill();
+      mapLabel(routeLevel(preview.level) + ' · ~' + preview.eta + ' h', X(endLon) + 8, Y(end.lat) - 10, '#7bea9a');
+    }
+
     const trail = positionTrail.concat(estimatedTrail.filter(point => point.time > positionTime), [{ lat: sim.lat, lon: sim.lon }]);
     mctx.strokeStyle = '#ffc861'; mctx.lineWidth = 2;
     mctx.setLineDash(sim.positionUncertain ? [1, 5] : []);
@@ -2075,13 +2149,9 @@
   function hours(h){ const t=Math.round(h*60);
     return Math.floor(t/60)+'h '+pad2(t%60)+'m'; }
   const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const CANDIDATES=[{name:'hold station',brg:'—',   dist:0,  dLat: 0.00,dLon: 0.00},
-                    {name:'NNE 240 km', brg:'022°',dist:240,dLat: 2.00,dLon: 0.81},
-                    {name:'W 410 km',   brg:'271°',dist:410,dLat: 0.06,dLon:-3.69},
-                    {name:'SSW 620 km', brg:'203°',dist:620,dLat:-5.13,dLon:-2.18}];
   const NEED_ROWS = ['thermal','night','light','vpd','daylen'];
   const PHOTO_ROW = 4;
-  let cropEls=null, candEls=null;
+  let cropEls=null;
 
   function buildRows() {
     el.croplist.innerHTML = CROPS.map(function(c,i){
@@ -2108,15 +2178,6 @@
         want:[0,1,2,3,4].map(j=>q('[data-want="'+i+'-'+j+'"]')),
         got:[0,1,2,3,4].map(j=>q('[data-got="'+i+'-'+j+'"]')),
         st:[0,1,2,3,4].map(j=>q('[data-st="'+i+'-'+j+'"]')) };
-    });
-    el.candlist.innerHTML = CANDIDATES.map(function(c,i){
-      return '<div class="cand"><div class="hd"><span>'+c.name+'</span>'+
-        '<span class="sc" data-sc="'+i+'"></span></div>'+
-        '<div class="dt" data-dt="'+i+'"></div></div>';
-    }).join('');
-    candEls = CANDIDATES.map(function(c,i){
-      return { sc: el.candlist.querySelector('[data-sc="'+i+'"]'),
-               dt: el.candlist.querySelector('[data-dt="'+i+'"]') };
     });
   }
 
@@ -2163,6 +2224,119 @@
     return Math.max(0, 100 - miss);
   }
 
+  function weatherNeed(wx, phase, crop = CROPS[guidanceCropIndex()]) {
+    const a = axesOf(wx, crop);
+    if (!Object.values(a).every(Number.isFinite)) return 'Crop weather is unavailable. Waiting for a complete forecast.';
+    const needs = [];
+    if (a.nightMin < phase.night[0]) needs.push('warmer nights');
+    if (a.nightMin > phase.night[1]) needs.push('cooler nights');
+    if (a.dayMax > phase.heat) needs.push('cooler days');
+    if (a.dli < phase.dli) needs.push('more light');
+    if (a.vpd < phase.vpd[0]) needs.push('drier air');
+    if (a.vpd > phase.vpd[1]) needs.push('more humid air');
+    if (phase.photo && a.photoperiod < phase.photo[0]) needs.push('longer days');
+    if (phase.photo && a.photoperiod > phase.photo[1]) needs.push('shorter days');
+    if (a.gddRate < phase.gdd / (crop.days * SPLIT[crop.need.indexOf(phase)])) needs.push('more warmth for growth');
+    return needs.length ? 'Look for ' + needs.join(', ') + '.' : 'Current weather meets this crop’s phase needs.';
+  }
+
+  function routeTradeoffs(row, currentWeather, phases, cropIndex) {
+    const warnings = [];
+    CROPS.forEach(function (crop, i) {
+      if (i === cropIndex || sown[i] === null || !phases[i]) return;
+      const phase = phases[i], ref = crop.days * SPLIT[crop.need.indexOf(phase)];
+      const baseline = fitScore(currentWeather, crop, phase, ref);
+      if (!Number.isFinite(baseline)) {
+        warnings.push(crop.name + ': current weather unavailable for comparison');
+        return;
+      }
+      const worst = row.weatherSamples.reduce((low, wx) => {
+        const score = fitScore(wx, crop, phase, ref);
+        return score < low.score ? { wx, score } : low;
+      }, { wx: currentWeather, score: baseline });
+      if (baseline - worst.score >= 5) {
+        warnings.push(crop.name + ': ' + weatherNeed(worst.wx, phase, crop).replace('Look for ', 'needs ') +
+          ' Fit −' + Math.round(baseline - worst.score) + ' vs now.');
+      }
+    });
+    return warnings;
+  }
+
+  function routeLevel(level) { return level === null ? 'surface' : level + ' hPa'; }
+
+  function routeDestination(row) {
+    if (row.eta === 0) return 'Suitable weather here';
+    const start = row.path[0];
+    const north = row.lat - start.lat, east = wrappedLongitude(row.lon - start.lon) * Math.cos(start.lat * D);
+    const bearing = (Math.atan2(east, north) / D + 360) % 360;
+    const direction = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'][Math.round(bearing / 45) % 8];
+    return 'Drift ' + direction + ' · ~' + row.eta + ' h';
+  }
+
+  let guidanceMarkup = '';
+  function renderWeatherGuidance(st, phase, refDays, phases = [], cropIndex = guidanceCropIndex()) {
+    document.getElementById('guidance-crop').value = String(cropIndex);
+    document.getElementById('weather-need').textContent = weatherNeed(st.wx, phase, CROPS[cropIndex]);
+    const rows = weatherRoutes(sim.lat, sim.lon, st.now, phase, refDays, cropIndex);
+    const current = rows.find(row => row.level === pressureLevel);
+    const choices = rows.slice(0, 3);
+    if (current && !choices.includes(current)) choices[choices.length - 1] = current;
+    const uncertain = sim.positionUncertain || sim.weatherEstimated;
+    const markup = choices.map(function (row, i) {
+      const staying = row.level === pressureLevel;
+      const currentOnly = row.forecastHours === 0;
+      const title = currentOnly ? 'Weather at ' + routeLevel(row.level) : staying ? 'Stay at ' + routeLevel(row.level) : 'Fly at ' + routeLevel(row.level);
+      const a = axesOf(row.wx, CROPS[cropIndex]);
+      const good = row.score >= 88;
+      const destination = currentOnly ? 'Current conditions only · route forecast pending' : good ? routeDestination(row) : 'No suitable weather in the known part of this route';
+      const window = good ? (row.suitableHours ? '~' + row.suitableHours + ' h suitable along drift' : 'Brief suitable window') : 'Best available: ' + Math.round(row.score) + '/100';
+      return '<div class="cand' + (i === 0 ? ' recommended' : '') + '"><div class="hd"><b>' + title +
+        '</b><span class="sc">' + Math.round(row.meanScore) + '</span></div><div class="dt">' +
+        (i === 0 && row.comparisonHours > 0 ? 'Best available route · ' : '') + destination + '</div><div class="dt">Nights ' +
+        a.nightMin.toFixed(0) + '°C · light ' + a.dli.toFixed(0) + ' mol/d</div><div class="dt">' +
+        (currentOnly ? 'Waiting for weather along the drift' : window + ' · ' + row.forecastHours + ' h forecast available') +
+        '</div>' + routeTradeoffs(row, st.wx, phases, cropIndex).map(text => '<div class="tradeoff">' + text + '</div>').join('') +
+        '<div class="route-actions"><button data-preview="' + row.level + '"' + (uncertain || currentOnly ? ' disabled' : '') +
+        '>' + (outlook.preview === String(row.level) ? 'Hide route' : 'Preview route') + '</button><button data-level="' + row.level + '"' +
+        (staying || uncertain || currentOnly ? ' disabled' : '') + '>Set flight level</button></div></div>';
+    }).join('');
+    const content = markup || '<div class="dt">' + (weather.pending ? 'Loading wind and crop forecasts…' : 'Wind or crop forecasts are unavailable here. Retrying automatically.') + '</div>';
+    if (guidanceMarkup !== content) { el.candlist.innerHTML = content; guidanceMarkup = content; }
+    document.getElementById('route-note').textContent = uncertain ? 'Position or weather is estimated. Route actions resume when forecasts recover.' :
+      (outlook.pending.length ? 'Some routes lack forecasts. ' : '') +
+      (weather === simulatedWeather ? 'Simulated weather. ' : '') + 'Searching up to 12 hours ahead · scores compare ' + (rows[0]?.comparisonHours ? 'the next ' + rows[0].comparisonHours + ' shared forecast hours' : 'current conditions') + ' · reassess as winds change.';
+  }
+
+  el.candlist.addEventListener('click', function (event) {
+    const button = event.target.closest('button');
+    if (!button || button.disabled || sim.positionUncertain || sim.weatherEstimated) return;
+    const preview = button.dataset.preview;
+    const value = preview === undefined ? button.dataset.level : preview;
+    const row = outlook.rows.find(row => String(row.level) === value);
+    if (!row || row.forecastHours === 0) return;
+    if (preview !== undefined) {
+      outlook.preview = outlook.preview === value ? null : value;
+      if (outlook.preview !== null) {
+        map.lon = row.path[0].lon;
+        map.lat = row.path[0].lat;
+        const rect = mapc.getBoundingClientRect();
+        const span = row.path.reduce((size, point) => Math.max(size,
+          Math.abs(wrappedLongitude(point.lon - map.lon)) / 360,
+          Math.abs(mercY(point.lat) - mercY(map.lat))), 0);
+        map.zi = ZOOMS.reduce((best, zoom, i) => span * Math.min(rect.width, rect.height) * zoom < Math.min(rect.width, rect.height) * 0.4 ? i : best, 0);
+        posPanel.classList.remove('collapsed');
+        syncMapCtl();
+      }
+      mapDirty = true;
+    } else {
+      selectPressureLevel(row.level);
+      levelControl.value = row.level === null ? 0 : PRESSURE_LEVELS.indexOf(row.level) + 1;
+      syncFlightLevel();
+      document.getElementById('sim').textContent = weatherNote();
+      outlook.key = null;
+    }
+  });
+
   document.querySelectorAll('.panel .ttl').forEach(function (t) {
     t.addEventListener('click', function () { t.parentNode.classList.toggle('collapsed'); });
   });
@@ -2184,33 +2358,16 @@
     if (key === dayLabelKey) return;
     dayLabelKey = key;
 
-    let rc = riseH/24 * w, sc = setH/24 * w;
-    rc = Math.max(rw/2, Math.min(w - rw/2, rc));
-    sc = Math.max(sw/2, Math.min(w - sw/2, sc));
-    const need = rw/2 + sw/2 + 4;
-    if (sc - rc < need) {
-      const mid = (rc + sc) / 2;
-      rc = mid - need/2; sc = mid + need/2;
-      if (rc < rw/2) { rc = rw/2; sc = rc + need; }
-      if (sc > w - sw/2) { sc = w - sw/2; rc = sc - need; }
-    }
-    el.risemk.style.left = Math.round(rc - rw/2) + 'px';
-    el.setmk.style.left = Math.round(sc - sw/2) + 'px';
-
-    const gapL = rc + rw/2, gapR = sc - sw/2;
-    const fits = function (room) {
-      el.sunlab.hidden = false;
-      if (el.sunmk.offsetWidth + 6 <= room) return true;
-      el.sunlab.hidden = true;
-      return el.sunmk.offsetWidth + 6 <= room;
-    };
-    const leftRoom = rc - rw/2, rightRoom = w - (sc + sw/2);
-    let x;
-    if (fits(gapR - gapL)) x = (gapL + gapR)/2 - el.sunmk.offsetWidth/2;
-    else if (rightRoom >= leftRoom) { fits(rightRoom); x = w - el.sunmk.offsetWidth; }
-    else { fits(leftRoom); x = 0; }
+    el.risemk.style.left = '0px';
+    el.setmk.style.left = Math.max(0, w - sw) + 'px';
+    const room = w - 2 * Math.max(rw, sw) - 12;
+    el.sunlab.hidden = false;
+    if (el.sunmk.offsetWidth > room) el.sunlab.hidden = true;
     const uw = el.sunmk.offsetWidth;
-    el.sunmk.style.left = Math.round(Math.max(0, Math.min(w - uw, x))) + 'px';
+    const separateLine = uw > room;
+    el.sunmk.style.left = Math.round(Math.max(0, (w - uw) / 2)) + 'px';
+    el.sunmk.style.top = separateLine ? '14px' : '0px';
+    el.dayscale.style.height = separateLine ? '26px' : '12px';
   }
 
   function formatWeather(value, digits) {
@@ -2250,7 +2407,6 @@
     const scyc = phaseAt(tracks[SCORE_CROP], st.missionDay) || { idx: -2 };
     const sIdx = scyc.idx >= 0 ? scyc.idx : 0;
     const sph = scored.need[sIdx];
-    const sRef = SPLIT[sIdx] * scored.days;
     const gaugePh = scyc.idx >= 0 ? sph : null;
     const night = gaugePh ? gaugePh.night : sph.night;
     const ceil = gaugePh ? gaugePh.heat : sph.heat;
@@ -2356,31 +2512,17 @@
       }
     }
 
-    el.candtag.textContent = scored.name + ' \u00b7 ' +
-      (scyc.idx >= 0 ? sph.note : 'if sown');
-
-    let best=-1, bi=-1;
-    const outs = candidateOutlooks(sim.lat, sim.lon, st.now, st.missionDay, endDay);
-    for (let i = 0; i < CANDIDATES.length; i++) {
-      const cd = CANDIDATES[i], o = outs[i];
-      const short = Math.min(1, Math.max(0, (scored.days - o.usable) / scored.days));
-      const sc = Math.max(0, fitScore(o.wx, scored, sph, sRef) - 45 * short);
-      if (sc > best) { best = sc; bi = i; }
-      candEls[i].sc.textContent = formatWeather(sc, 0);
-      candEls[i].sc.style.color = sc>=88?'var(--green)':sc>=65?'var(--amber)':'var(--red)';
-      const ax = axesOf(o.wx, scored);
-      candEls[i].dt.textContent = cd.brg+'  ·  '+
-        (cd.dist ? cd.dist+' km · '+o.eta.toFixed(0)+' h  ·  ' : '')+
-        formatWeather(ax.nightMin, 0)+'/'+formatWeather(ax.dayMax, 0)+' °C  ·  '+
-        formatWeather(ax.dli, 0)+' mol  ·  '+
-        (o.unknownFrom !== null && o.unknownFrom !== undefined ? 'forecast ends D' + (Math.round(o.unknownFrom) + 1) : o.usable === Infinity
-          ? (o.harvest === null ? 'no stall' : 'harvest D' + (Math.round(o.harvest) + 1))
-          : Math.round(o.usable) + ' d usable');
-      candEls[i].dt.style.color = o.usable < scored.days ? 'var(--red)' : '';
-    }
-    for (let i = 0; i < CANDIDATES.length; i++)
-      candEls[i].sc.parentNode.parentNode.style.background =
-        i===bi ? 'rgba(123,234,154,0.09)' : 'transparent';
+    const guidanceIndex = guidanceCropIndex();
+    const guidancePhases = tracks.map(function (track, i) {
+      const cycle = phaseAt(track, st.missionDay);
+      return CROPS[i].need[cycle && cycle.idx >= 0 ? cycle.idx : 0];
+    });
+    const guidancePhase = guidancePhases[guidanceIndex];
+    const guidanceTarget = CROPS[guidanceIndex];
+    el.candtag.textContent = guidanceTarget.name + ' · ' +
+      (sown[guidanceIndex] === null ? 'if sown' : guidancePhase.note);
+    renderWeatherGuidance(st, guidancePhase,
+      guidanceTarget.days * SPLIT[guidanceTarget.need.indexOf(guidancePhase)], guidancePhases, guidanceIndex);
 
     const stallDay = tracks[SCORE_CROP].stall;
     const doomed = stallDay !== null;
@@ -2417,7 +2559,8 @@
       : positionCorrection ? 'Correcting route' : sim.weatherEstimated || sim.positionUncertain ? 'Estimated' : usesArchive(st.now) ? 'Hindsight' : 'Catching up';
     const markDay = scrub === null ? st.missionDay : scrub;
     if (Number.isFinite(st.wx.cloud_cover)) sim.cloud = st.wx.cloud_cover / 100;
-    weather.prime(scoringPoints(), st.missionDay + 2);
+    weather.prime([{ lat: sim.lat, lon: sim.lon }], st.missionDay + 2);
+    primeRouteWeather(st.missionDay);
 
     const w = window.innerWidth, h = window.innerHeight, e = st.sun.elev;
     const k0 = Math.max(0.30, Math.min(1, (e+9)/26));
@@ -2522,6 +2665,17 @@
       },
       { timeout: 10000, maximumAge: 600000 });
   }
+
+  const guidanceControl = document.getElementById('guidance-crop');
+  guidanceControl.innerHTML = CROPS.map((crop, i) => '<option value="' + i + '">' + crop.name + '</option>').join('');
+  guidanceControl.addEventListener('change', function () {
+    const index = Number(guidanceControl.value);
+    if (!Number.isInteger(index) || !CROPS[index]) return;
+    guidanceCrop = index;
+    outlook.key = null;
+    outlook.preview = null;
+    mapDirty = true;
+  });
 
   setupReplayControls();
 
