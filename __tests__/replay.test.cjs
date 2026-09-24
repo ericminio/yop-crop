@@ -89,15 +89,80 @@ test('unavailable archived wind uses estimates while retries stay on real time',
   assert.equal(requests, 2);
 });
 
-test('a new game day requests a new historical forecast window', async () => {
+test('crossing midnight reuses downloaded historical hours for wind and crop weather', async () => {
   const requests = [];
   const run = replay(async url => { requests.push(new URL(url)); return {ok: true, json: async () => row()}; });
   await load(run);
   assert.equal(run('readState().now'), start);
   run(`replayClock.time = ${start + 20 * 3600000}; positionTime = replayClock.time`);
   await load(run);
+  assert.equal(requests.length, 1);
+  assert.equal(run('flightAt(0, 0, gameNow()).speed'), 0);
+  assert.equal(run('openMeteoWeather.at(0, 0, gameNow()).temperature_2m'), 12);
+});
+
+test('replay fetches uncovered hours and retains earlier downloaded windows', async () => {
+  const requests = [];
+  const later = start + 5 * 86400000;
+  const run = replay(async url => {
+    requests.push(url);
+    return {ok: true, json: async () => row(requests.length === 1 ? start : later)};
+  });
+  await load(run);
+  run(`replayClock.time = ${later}; positionTime = replayClock.time`);
+  await load(run);
   assert.equal(requests.length, 2);
-  assert.equal(requests[1].searchParams.get('end_date'), '2026-04-19');
+  assert.equal(run(`flightAt(0, 0, ${start + 86400000})?.speed`), 0);
+  assert.equal(run(`flightAt(0, 0, ${later + 86400000})?.speed`), 0);
+  run(`replayClock.time = ${start + 3 * 86400000}; positionTime = replayClock.time`);
+  await load(run);
+  assert.equal(requests.length, 3, 'a gap between downloaded windows must still fetch');
+});
+
+test('replay deduplicates a batch by grid cell and fetches when crossing a cell boundary', async () => {
+  const requests = [];
+  const run = replay(async url => { requests.push(new URL(url)); return {ok: true, json: async () => row()}; });
+  run('openMeteoWeather.prime([{lat: 0.01, lon: 0.01}, {lat: 0.12, lon: 0.12}], 2)');
+  await settle();
+  assert.equal(requests[0].searchParams.get('latitude'), '0.0000');
+  assert.equal(requests[0].searchParams.get('longitude'), '0.0000');
+  run(`replayClock.time = ${start + 86400000}; positionTime = replayClock.time;
+    openMeteoWeather.prime([{lat: -0.12, lon: -0.12}], 2)`);
+  await settle();
+  assert.equal(requests.length, 1);
+  run('openMeteoWeather.prime([{lat: 0.13, lon: 0.13}], 2)');
+  await settle();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].searchParams.get('latitude'), '0.2500');
+});
+
+test('daily coverage alone does not suppress a replay request for missing hourly data', async () => {
+  let requests = 0;
+  const partial = row();
+  partial.hourly.time = partial.hourly.time.slice(0, 24);
+  const run = replay(async () => ({ok: true, json: async () => ++requests === 1 ? partial : row()}));
+  await load(run);
+  run(`replayClock.time = ${start + 86400000}; positionTime = replayClock.time`);
+  await load(run);
+  assert.equal(requests, 2);
+});
+
+test('overlapping archive downloads replace matching hours and retain altitude wind samples', async () => {
+  let requests = 0;
+  const run = replay(async () => {
+    const updated = requests++ > 0;
+    const data = row(start + (updated ? 86400000 : 0));
+    data.hourly.wind_speed_850hPa = Array(72).fill(updated ? 30 : 10);
+    data.hourly.wind_direction_850hPa = Array(72).fill(270);
+    data.hourly.geopotential_height_850hPa = Array(72).fill(1500);
+    return {ok: true, json: async () => data};
+  });
+  await load(run);
+  run(`openMeteoWeather.prime([{lat: 0, lon: 0}], 2, true, ${start + 86400000})`);
+  await settle();
+  assert.equal(run(`flightAt(0, 0, ${start}, 850).speed`), 10);
+  assert.equal(run(`flightAt(0, 0, ${start + 86400000}, 850).speed`), 30);
+  assert.equal(run(`flightAt(0, 0, ${start + 3 * 86400000}, 850).speed`), 30);
 });
 
 test('invalid and unavailable replay dates do not start historical missions', () => {

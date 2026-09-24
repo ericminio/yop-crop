@@ -677,15 +677,39 @@
     coordinate: function (value, when = gameNow()) { return replayClock || usesArchive(when) ? Math.round(value * 4) / 4 : value; },
     key: function (lat, lon, when = gameNow()) {
       const locationKey = Number(this.coordinate(lat, when).toFixed(2)).toFixed(2) + ',' + Number(this.coordinate(lon, when).toFixed(2)).toFixed(2);
-      return replayClock || usesArchive(when) ? locationKey + '@' + (usesArchive(when) ? 'history:' : 'forecast:') + utcDate(when) : locationKey;
+      return replayClock || usesArchive(when) ? locationKey + '@' + (usesArchive(when) ? 'history' : 'forecast') : locationKey;
+    },
+    coversFlight: function (row, when) {
+      const times = row?.hourly?.time, sec = when / 1000;
+      return !!times?.length && this.covers(row, when) && sec >= times[0] && sec <= times[times.length - 1] &&
+        Math.abs(times[nearestIndex(times, sec)] - sec) <= 1800;
+    },
+    mergeArchive: function (previous, incoming) {
+      if (!previous) return incoming;
+      const merged = { ...incoming };
+      for (const section of ['hourly', 'daily']) {
+        const old = previous[section], next = incoming[section];
+        const oldIndices = new Map(old.time.map((time, index) => [time, index]));
+        const nextIndices = new Map(next.time.map((time, index) => [time, index]));
+        const time = [...new Set([...old.time, ...next.time])].sort((a, b) => a - b);
+        merged[section] = { time };
+        for (const field of new Set([...Object.keys(old), ...Object.keys(next)])) {
+          if (field === 'time') continue;
+          merged[section][field] = time.map(t => nextIndices.has(t)
+            ? next[field]?.[nextIndices.get(t)] ?? null : old[field]?.[oldIndices.get(t)] ?? null);
+        }
+      }
+      return merged;
     },
     prime: function (points, pastDays, force, when = gameNow()) {
       const now = Date.now();
       if (this.pending || (!force && now < this.retryAt)) return;
       const self = this;
-      const miss = points.filter(function (pt) {
+      const unique = [...new Map(points.map(pt => [self.key(pt.lat, pt.lon, when), pt])).values()];
+      const miss = unique.filter(function (pt) {
         const key = self.key(pt.lat, pt.lon, when);
         return force || !self.cache.has(key) || !self.fetchedAt.has(key) ||
+          ((replayClock || usesArchive(when)) && !self.coversFlight(self.cache.get(key), when)) ||
           (!usesArchive(when) && now - self.fetchedAt.get(key) >= self.refreshMs);
       });
       if (!miss.length) return;
@@ -729,7 +753,7 @@
           rows.forEach(function (row, i) {
             if (row && row.hourly?.time?.length && row.daily?.time?.length && miss[i]) {
               const key = keys[i];
-              self.cache.set(key, row);
+              self.cache.set(key, historical ? self.mergeArchive(self.cache.get(key), row) : row);
               self.fetchedAt.set(key, Date.now());
               self.revision++;
               loaded++;
@@ -745,8 +769,7 @@
         .finally(function () { clearTimeout(timer); });
     },
     covers: function (row, when) {
-      const t = row.daily.time, sec = when / 1000;
-      return sec >= t[0] && sec < t[t.length - 1] + 86400;
+      return row.daily.time.includes(Math.floor(when / 86400000) * 86400);
     },
     horizonAt: function (lat, lon, when, now) {
       const row = this.cache.get(this.key(lat, lon, when)) || this.cache.get(this.key(lat, lon));
