@@ -67,6 +67,20 @@
   #top .big { font-size: 17px; line-height: 1.05; font-variant-numeric: tabular-nums;
               white-space: nowrap; }
   #top .sub { font-size: 9.5px; color: var(--dim); margin-top: 2px; white-space: nowrap; }
+  .replay-controls { display: flex; align-items: center; gap: 6px; margin-top: 6px; pointer-events: auto; }
+  .replay-controls button, .replay-controls select, .replay-controls input {
+    background: #0a1b29; color: var(--cyan); border: 1px solid var(--edge);
+    font: inherit; font-size: 10px; padding: 4px 6px; color-scheme: dark; }
+  .replay-controls button, .replay-controls summary, .replay-controls select { cursor: pointer; }
+  .replay-controls details { position: relative; }
+  .replay-controls summary { color: var(--cyan); font-size: 10px; }
+  #replay-form { position: absolute; left: -80px; top: 24px; width: 270px; padding: 14px;
+    background: #0a1b29; border: 1px solid var(--cyan); box-shadow: 0 8px 28px #0009; }
+  #replay-form label { display: block; margin: 10px 0 5px; color: var(--ink); }
+  #replay-form p { color: var(--dim); font-size: 10px; line-height: 1.5; margin: 0 0 8px; }
+  #replay-form input { width: 100%; box-sizing: border-box; margin-bottom: 10px; }
+  #replay-form .actions { display: flex; justify-content: space-between; }
+  #replay-state { color: var(--amber); font-size: 9px; }
   .flight-control { position: absolute; top: 9px; right: 7px; bottom: 10px; width: 48px;
     display: flex; flex-direction: column; align-items: center; gap: 7px;
     border-left: 1px solid var(--edge); padding-left: 6px; }
@@ -216,6 +230,25 @@
       <div class="lab">Mission clock</div><div class="big" id="clock">--:--:--</div>
       <div class="sub">day <span id="mday">—</span> &middot; <span id="datestr">—</span>
         &middot; <span id="lstnow">—</span> LST</div>
+      <div class="replay-controls">
+        <select id="replay-speed" aria-label="Replay speed" hidden>
+          <option value="0">Paused</option><option value="1">1×</option>
+          <option value="60">60×</option><option value="360">360×</option>
+          <option value="1440">1440×</option>
+        </select>
+        <details id="replay-settings">
+          <summary>Replay…</summary>
+          <form id="replay-form">
+            <p>Fly through past weather. Historical conditions stand in for the forecast, including the days ahead.</p>
+            <label for="replay-start">Start time (UTC)</label>
+            <input id="replay-start" type="datetime-local" required min="2022-01-01T00:00">
+            <p>Available from January 2022. Starts paused at your current location. Starting a mission clears crops and the flight trail.</p>
+            <div class="actions"><button type="submit">Start new mission</button>
+              <button type="button" id="replay-live">Return to live</button></div>
+          </form>
+        </details>
+        <span id="replay-state" aria-live="polite"></span>
+      </div>
     </div>
     <div class="cell">
       <div class="lab">Position</div><div class="big" id="latlon">—</div>
@@ -372,7 +405,33 @@
   const TOTAL_AREA = CROPS.reduce(function (s, c) { return s + c.area; }, 0);
   const ROCK_DARK = [70,58,48], BALLOON_COLOR = [226,196,74];
 
-  let missionStartedAt = Date.now();
+  const REPLAY_MIN = Date.UTC(2022, 0, 1);
+  const replayInput = new URLSearchParams(location.search).get('replay');
+  const replayStart = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(replayInput || '')
+    ? Date.parse(replayInput + 'Z') : NaN;
+  const replayClock = Number.isFinite(replayStart) && replayStart >= REPLAY_MIN && replayStart <= Date.now() - 86400000
+    ? { time: replayStart, speed: 0, lastReal: Date.now(), waiting: false } : null;
+
+  function gameNow() { return replayClock ? replayClock.time : Date.now(); }
+  function utcDate(when) { return new Date(when).toISOString().slice(0, 10); }
+  function setReplaySpeed(speed) {
+    if (!replayClock || ![0, 1, 60, 360, 1440].includes(speed)) return;
+    readState();
+    replayClock.speed = speed;
+    replayClock.lastReal = Date.now();
+  }
+  function advanceReplay() {
+    const real = Date.now();
+    const elapsed = Math.max(0, Math.min(1000, real - replayClock.lastReal));
+    replayClock.lastReal = real;
+    const target = Math.min(real - 86400000, replayClock.time + elapsed * replayClock.speed);
+    advancePosition(target);
+    replayClock.waiting = positionTime < target;
+    replayClock.time = positionTime;
+    if (replayClock.time >= real - 86400000) replayClock.speed = 0;
+  }
+
+  let missionStartedAt = gameNow();
   const FORECAST_DAYS = 16;
   const PRESSURE_LEVELS = [1000, 975, 950, 925, 900, 850, 800, 700, 600,
                          500, 400, 300, 250, 200, 150, 100, 70, 50, 30];
@@ -501,36 +560,48 @@
     refreshMs: 15 * 60000,
     retryAt: 0,
     pending: false,
-    key: function (lat, lon) { return lat.toFixed(2) + ',' + lon.toFixed(2); },
-    prime: function (points, pastDays, force) {
+    coordinate: function (value) { return replayClock ? Math.round(value * 4) / 4 : value; },
+    key: function (lat, lon, when = gameNow()) {
+      const locationKey = this.coordinate(lat).toFixed(2) + ',' + this.coordinate(lon).toFixed(2);
+      return replayClock ? locationKey + '@' + utcDate(when) : locationKey;
+    },
+    prime: function (points, pastDays, force, when = gameNow()) {
       const now = Date.now();
       if (this.pending || (!force && now < this.retryAt)) return;
       const self = this;
       const miss = points.filter(function (pt) {
-        const key = self.key(pt.lat, pt.lon);
+        const key = self.key(pt.lat, pt.lon, when);
         return force || !self.cache.has(key) || !self.fetchedAt.has(key) ||
-          now - self.fetchedAt.get(key) >= self.refreshMs;
+          (!replayClock && now - self.fetchedAt.get(key) >= self.refreshMs);
       });
       if (!miss.length) return;
+      const keys = miss.map(function (pt) { return self.key(pt.lat, pt.lon, when); });
+      const historical = !!replayClock;
       this.pending = true;
       this.retryAt = now + 60000;
-      const back = Math.max(1, Math.min(92, Math.ceil(pastDays || 1)));
+      const historyDays = historical ? Math.max(pastDays || 1, (when - missionStartedAt) / 86400000 + 2) : pastDays || 1;
+      const back = Math.max(1, Math.min(92, Math.ceil(historyDays)));
       const controller = new AbortController();
       let timer;
       const timeout = new Promise(function (_, reject) {
         timer = setTimeout(function () {
           reject(new Error('Weather request timed out'));
           controller.abort();
-        }, 15000);
+        }, historical ? 45000 : 15000);
       });
-      const request = fetch(this.endpoint +
-        '?latitude=' + miss.map(function (pt) { return pt.lat.toFixed(4); }).join(',') +
-        '&longitude=' + miss.map(function (pt) { return pt.lon.toFixed(4); }).join(',') +
+      const endpoint = historical ? 'https://historical-forecast-api.open-meteo.com/v1/forecast' : this.endpoint;
+      const range = historical
+        ? '&models=gfs_global&start_date=' + utcDate(Math.max(REPLAY_MIN, when - back * 86400000)) +
+          '&end_date=' + utcDate(Math.min(Date.now() - 86400000, when + (FORECAST_DAYS - 1) * 86400000))
+        : '&past_days=' + back + '&forecast_days=' + FORECAST_DAYS;
+      const request = fetch(endpoint +
+        '?latitude=' + miss.map(function (pt) { return self.coordinate(pt.lat).toFixed(4); }).join(',') +
+        '&longitude=' + miss.map(function (pt) { return self.coordinate(pt.lon).toFixed(4); }).join(',') +
         '&hourly=' + this.hourly.join(',') +
         '&daily=' + this.daily.join(',') +
         '&wind_speed_unit=kmh' +
-        '&past_days=' + back +
-        '&forecast_days=' + FORECAST_DAYS + '&timeformat=unixtime&timezone=UTC',
+        range +
+        '&timeformat=unixtime&timezone=UTC',
         { signal: controller.signal })
         .then(function (r) {
           if (!r.ok) throw new Error('Weather request failed');
@@ -542,7 +613,7 @@
           let loaded = 0;
           rows.forEach(function (row, i) {
             if (row && row.hourly?.time?.length && row.daily?.time?.length && miss[i]) {
-              const key = self.key(miss[i].lat, miss[i].lon);
+              const key = keys[i];
               self.cache.set(key, row);
               self.fetchedAt.set(key, Date.now());
               self.revision++;
@@ -571,6 +642,7 @@
       if (pressureLevel !== null) return pressureWeatherAt(lat, lon, when);
       const row = this.cache.get(this.key(lat, lon));
       if (!row || !this.covers(row, when)) {
+        if (replayClock) return Object.fromEntries(this.hourly.concat(this.daily).map(function (field) { return [field, NaN]; }));
         const { wind_speed_10m, wind_direction_10m, ...cropWeather } = simulatedWeather.at(lat, lon, when);
         return cropWeather;
       }
@@ -592,7 +664,7 @@
   };
 
   const PROVIDERS = { simulated: simulatedWeather, 'open-meteo': openMeteoWeather };
-  let weather = PROVIDERS[new URLSearchParams(location.search).get('weather')] ||
+  let weather = (replayClock ? openMeteoWeather : PROVIDERS[new URLSearchParams(location.search).get('weather')]) ||
                 openMeteoWeather;
 
   function scoringPoints() {
@@ -720,10 +792,10 @@
       const wx = weather.at(lat, lon, when);
       return { speed: wx.wind_speed_10m, direction: wx.wind_direction_10m, altitude: null };
     }
-    const key = openMeteoWeather.key(lat, lon);
+    const key = openMeteoWeather.key(lat, lon, when);
     const row = weather === openMeteoWeather && openMeteoWeather.cache.get(key);
     const fetched = openMeteoWeather.fetchedAt.get(key);
-    if (!Number.isFinite(fetched) || Date.now() - fetched >= openMeteoWeather.refreshMs) return null;
+    if (!Number.isFinite(fetched) || (!replayClock && Date.now() - fetched >= openMeteoWeather.refreshMs)) return null;
     if (!row || !openMeteoWeather.covers(row, when)) return null;
     const times = row.hourly.time, sec = when / 1000;
     if (sec < times[0] || sec > times[times.length - 1]) return null;
@@ -740,9 +812,9 @@
 
   function selectPressureLevel(level) {
     if (level !== null && !PRESSURE_LEVELS.includes(level)) throw new RangeError('Unknown pressure level');
-    advancePosition(Date.now());
+    advancePosition(gameNow());
     pressureLevel = level;
-    flightLevels.push({ time: Date.now(), level: level });
+    flightLevels.push({ time: gameNow(), level: level });
     readState();
   }
 
@@ -763,9 +835,11 @@
       const flight = flightAt(sim.lat, sim.lon, positionTime, level);
       if (!flight || (weather === openMeteoWeather && !flightAt(sim.lat, sim.lon, positionTime + dt, level))) {
         if (weather === openMeteoWeather) {
-          const fetched = weather.fetchedAt.get(weather.key(sim.lat, sim.lon));
-          if (now >= weather.retryAt && (!Number.isFinite(fetched) || now - fetched >= 60000)) {
-            weather.prime([{ lat: sim.lat, lon: sim.lon }], (now - positionTime) / 86400000 + 2, true);
+          const missingTime = flight ? positionTime + dt : positionTime;
+          const fetched = weather.fetchedAt.get(weather.key(sim.lat, sim.lon, missingTime));
+          const real = Date.now();
+          if (real >= weather.retryAt && (!Number.isFinite(fetched) || real - fetched >= 60000)) {
+            weather.prime([{ lat: sim.lat, lon: sim.lon }], (now - positionTime) / 86400000 + 2, true, missingTime);
           }
         }
         return;
@@ -786,7 +860,8 @@
   }
 
   function readState() {
-    const now = Date.now();
+    if (replayClock) advanceReplay();
+    const now = gameNow();
     advancePosition(now);
     const d = new Date(now);
     const utcHours = d.getUTCHours() + d.getUTCMinutes()/60 + d.getUTCSeconds()/3600;
@@ -1736,7 +1811,7 @@
 
   el.status.addEventListener('click', function () {
     if (el.status.disabled || weather !== openMeteoWeather) return;
-    weather.prime([{ lat: sim.lat, lon: sim.lon }], (Date.now() - Math.min(missionStartedAt, positionTime ?? Date.now())) / 86400000 + 2, true);
+    weather.prime([{ lat: sim.lat, lon: sim.lon }], (gameNow() - Math.min(missionStartedAt, positionTime ?? gameNow())) / 86400000 + 2, true);
     el.status.disabled = true;
     el.status.textContent = 'retrying weather…';
   });
@@ -2069,6 +2144,10 @@
 
   function frame(now) {
     const st = readState();
+    if (replayClock) {
+      document.getElementById('replay-speed').value = replayClock.speed;
+      document.getElementById('replay-state').textContent = replayClock.waiting ? 'Waiting for weather' : 'Hindsight';
+    }
     const markDay = scrub === null ? st.missionDay : scrub;
     if (Number.isFinite(st.wx.cloud_cover)) sim.cloud = st.wx.cloud_cover / 100;
     weather.prime(scoringPoints(), st.missionDay + 2);
@@ -2096,7 +2175,7 @@
   function setPosition(lat, lon, source) {
     sim.lat = lat;
     sim.lon = ((lon + 180) % 360 + 360) % 360 - 180;
-    positionTime = Date.now();
+    positionTime = gameNow();
     missionStartedAt = positionTime;
     sown.fill(null);
     scrub = null;
@@ -2117,9 +2196,39 @@
   }
 
   function weatherNote() {
+    if (replayClock) return 'historical weather replay · hindsight forecast · GFS';
     return (weather === simulatedWeather ? 'simulated conditions' : 'open-meteo forecast') +
            (pressureLevel === null ? ' \u00b7 mission clock is real \u00b7 drifting with wind'
              : ' \u00b7 ' + pressureLevel + ' hPa wind & crop weather \u00b7 light & water demand estimated');
+  }
+
+  function setupReplayControls() {
+    const input = document.getElementById('replay-start');
+    input.max = new Date(Date.now() - 86400000).toISOString().slice(0, 16);
+    input.value = replayClock ? new Date(missionStartedAt).toISOString().slice(0, 16)
+      : utcDate(Date.now() - 30 * 86400000) + 'T12:00';
+    const speed = document.getElementById('replay-speed');
+    speed.hidden = !replayClock;
+    speed.addEventListener('change', function () { setReplaySpeed(Number(speed.value)); });
+    document.getElementById('replay-form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (!input.reportValidity()) return;
+      const query = new URLSearchParams(location.search);
+      query.set('replay', input.value);
+      query.set('lat', sim.lat.toFixed(4));
+      query.set('lon', sim.lon.toFixed(4));
+      query.delete('weather');
+      location.search = query.toString();
+    });
+    document.getElementById('replay-live').hidden = !replayClock;
+    document.getElementById('replay-live').addEventListener('click', function () {
+      const query = new URLSearchParams(location.search);
+      query.delete('replay');
+      query.set('lat', sim.lat.toFixed(4));
+      query.set('lon', sim.lon.toFixed(4));
+      location.search = query.toString();
+    });
+    document.getElementById('replay-state').textContent = replayClock ? 'Hindsight' : 'Live';
   }
 
   function askPosition() {
@@ -2137,6 +2246,8 @@
       },
       { timeout: 10000, maximumAge: 600000 });
   }
+
+  setupReplayControls();
 
   const levelControl = document.getElementById('pressure-level');
   levelControl.max = PRESSURE_LEVELS.length;

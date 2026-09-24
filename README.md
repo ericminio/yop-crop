@@ -8,6 +8,38 @@ its crops need.
 
 `index.html` renders the platform.
 
+## Historical replay
+
+Open **Replay…** under the mission clock, choose a UTC date and time, and select
+**Start new mission**. Replay starts paused at the current location; choose 1×,
+60×, 360× or 1440× to play. At 1440×, one real minute represents one game day
+while weather is ready. Choose **Paused** to stop, or **Return to live** inside
+Replay to start a new live mission at the current location. Starting either mode
+clears sowing dates and the route. The date is kept in the URL; reloading starts
+that replay again, paused.
+
+For example, `?replay=2022-01-01T12:00&lat=48.85&lon=2.35` starts over Paris.
+Dates range from January 1, 2022 to 24 hours before the present. Replay stops at
+that upper bound. Mission days, drift, weather, sunlight and crop timing all use
+the replay clock. Returning from a suspended tab advances at most one real
+second's worth of simulation instead of catching up the entire absence.
+
+This is a **hindsight forecast**: archived GFS weather fills the same 16-day
+window used by the live forecast, including later historical conditions. It is
+modeled historical weather, not the forecast a player could actually have seen
+at that time, and not direct observations at every point. The
+[Historical Forecast API](https://open-meteo.com/en/docs/historical-forecast-api)
+provides the existing surface and pressure-level fields. Missing data, including
+beyond the archive, remains unavailable.
+
+Replay weather is requested on a 0.25° coordinate grid to reuse nearby weather
+while moving quickly. Cache entries are separated by game date, and archived
+values do not expire every 15 real minutes. Requests include up to 92 prior days,
+as in live mode. Network retries still use real time; archive requests time out
+after 45 seconds. The clock holds while required wind is unavailable, displays
+**Waiting for weather**, and resumes at the selected speed when data arrives.
+Loading can therefore reduce the effective playback speed.
+
 ## Weather adapters
 
 Open-Meteo forecasts are the default, so the flight level selector is enabled
@@ -21,7 +53,7 @@ The Open-Meteo weather adapter returns crop conditions only. Surface and
 pressure-level flight wind use the same reader and validation; the selected
 level determines the forecast fields, and pressure levels also require altitude.
 
-Cached forecasts refresh after 15 minutes, even when the platform is stationary.
+In live mode, cached forecasts refresh after 15 minutes, even when the platform is stationary.
 Cached crop conditions remain available during refresh, but wind expires after
 15 minutes and cannot advance the route until refreshed. Failed requests retry
 after one minute. These checks run when animation frames run, so returning to a
@@ -136,7 +168,7 @@ There is no model of ascent/descent, terrain clearance or route feasibility.
 The pressure levels and variables are documented in the
 [Open-Meteo forecast API](https://open-meteo.com/en/docs#pressure-level-variables).
 
-Position advances in real time with the selected adapter's wind, starting from
+In live mode, position advances in real time with the selected adapter's wind, starting from
 the initial position. Each page load starts a new mission on day 1. Selecting a
 new position restarts the mission on day 1, clears sowing dates and the timeline
 selection, and resets the movement clock there. Wind drift does not restart the
