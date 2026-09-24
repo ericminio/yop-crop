@@ -12,6 +12,7 @@
     --colw: 226px; --colrw: 300px; --mapw: 560px;
   }
   * { box-sizing: border-box; }
+  .mobile-label { display: none; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0a1622; }
   body { font: 11px/1.35 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
          color: var(--ink); -webkit-font-smoothing: antialiased; }
@@ -216,16 +217,59 @@
     letter-spacing: 0.14em; color: var(--dim); text-transform: uppercase; opacity: 0.75; }
 
   @media (max-width: 1120px) { :root { --colw: 198px; --colrw: 268px; } }
-  @media (max-width: 940px) { #colL { display: none; } #top .cell.opt { display: none; }
-    #top { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.4fr) minmax(0, 1fr); }
-    #colM { left: 14px; } }
-  @media (max-width: 700px) { #colM { display: none; }
-    #top { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); grid-template-rows: 88px 78px; }
-    #replay-form { left: auto; right: 0; }
-  }
-  @media (max-width: 640px) { #colR { left: 14px; right: 14px; width: auto; }
-    #tl { height: 150px; } #tlcanvas { height: 116px; } }
   @media (max-height: 620px) { #colR, #colL { bottom: 160px; } }
+  @media (max-width: 940px) {
+    .desktop-label { display: none; }
+    .mobile-label { display: inline; }
+    #hud { display: flex; flex-direction: column; gap: 12px; overflow-y: auto;
+      pointer-events: auto; padding: 0 max(10px, env(safe-area-inset-right))
+        max(16px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
+    #hud > * { flex-shrink: 0; }
+    #top { position: relative; order: 0; margin-bottom: 44px;
+      grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: 132px 88px 88px;
+      padding-top: env(safe-area-inset-top); }
+    #top .cell { padding: 9px 8px; }
+    #top .big { font-size: 15px; }
+    #top .sub { font-size: 10px; }
+    #top .daystrip, #top .dayscale { max-width: 100%; }
+    #top .tab { min-height: 44px; }
+    .replay-controls { flex-wrap: wrap; gap: 4px; }
+    .replay-controls details { position: static; }
+    .replay-controls summary { display: flex; align-items: center; min-width: 44px; min-height: 44px; }
+    .replay-controls select, .replay-controls input { font-size: 16px; min-height: 44px; }
+    #replay-speed { width: 82px; padding-inline: 2px; }
+    .replay-controls summary { justify-content: center; font-size: 20px; }
+    .replay-controls button { min-height: 44px; }
+    #replay-state { flex-basis: 100%; }
+    #replay-form { left: 0; right: 0; top: 124px; width: 100%; max-width: 360px;
+      max-height: 65dvh; overflow-y: auto; }
+    #colL, #colM, #colR { position: static; display: flex; width: 100%; overflow: visible; }
+    #colM { order: 1; }
+    #colR { order: 2; }
+    #colL { order: 4; }
+    #colM > #position { flex: none; height: 340px; }
+    #colM > #position.collapsed { height: auto; }
+    .panel { padding: 10px; background: rgba(6,17,27,0.88); }
+    .ttl { min-height: 44px; font-size: 10px; letter-spacing: 0.08em; }
+    .flight-control { width: 54px; }
+    #pressure-level { width: 44px; }
+    #position > .ttl, #position > .body { margin-right: 58px; }
+    .mapctl button { width: 44px; height: 44px; font-size: 20px; }
+    #recentre { min-height: 44px; }
+    .maphint { bottom: 54px; letter-spacing: 0; }
+    .crop .hd { min-height: 44px; align-items: center; gap: 4px; }
+    .need { padding-left: 0; grid-template-columns: 44px 1fr auto 38px; gap: 4px; }
+    .cand { padding: 10px 0; }
+    .cand .dt { line-height: 1.6; }
+    #tl { position: relative; order: 3; height: auto; }
+    #tl.collapsed { height: auto; }
+    #tlhead { flex-wrap: wrap; gap: 8px; padding: 8px; }
+    #tltoggle { min-height: 44px; letter-spacing: 0.06em; }
+    #tlhead .lg { flex-wrap: wrap; gap: 8px 12px; font-size: 8px; }
+    #nowbtn { min-height: 44px; }
+    #tlcanvas { height: 160px; }
+    #sim { position: static; order: 5; line-height: 1.6; }
+  }
   #top.collapsed { grid-template-rows: none; }
 </style>
 </head>
@@ -250,7 +294,7 @@
           <option value="1440">1440×</option>
         </select>
         <details id="replay-settings">
-          <summary>Replay…</summary>
+          <summary aria-label="Replay settings" title="Replay settings"><span class="desktop-label">Replay…</span><span class="mobile-label" aria-hidden="true">↺</span></summary>
           <form id="replay-form">
             <p>Fly through past weather. Historical conditions stand in for the forecast, including the days ahead.</p>
             <label for="replay-start">Start time (UTC)</label>
@@ -336,8 +380,8 @@
             <button id="zoomin" title="zoom in">+</button>
             <button id="zoomout" title="zoom out">&minus;</button>
           </div>
-          <button id="recentre">centre on FF1</button>
-          <div class="maphint">click to relocate</div>
+          <button id="recentre" aria-label="Centre on FF1"><span class="desktop-label">centre on FF1</span><span class="mobile-label" aria-hidden="true">◎ FF1</span></button>
+          <div class="maphint"><span class="desktop-label">click to relocate</span><span class="mobile-label">tap to relocate</span></div>
         </div>
       </div>
     </div>
@@ -362,7 +406,7 @@
 
   <div id="tl">
     <div id="tlhead">
-      <span class="strip-ttl" id="tltoggle"><span class="chev">▾</span>Crop cycles &middot; 140-day window</span>
+      <span class="strip-ttl" id="tltoggle"><span class="chev">▾</span><span class="desktop-label">Crop cycles &middot; 140-day window</span><span class="mobile-label">◷ Crops · 140 days</span></span>
       <span class="lg">
         <span><i style="background:#3f6f8c"></i>establish</span>
         <span><i style="background:#3f9c6b"></i>vegetative</span>
@@ -373,7 +417,7 @@
         <span><i style="background:rgba(215,242,255,0.42)"></i>forecast</span>
         <span><i style="background:rgba(215,242,255,0.16)"></i>projected</span>
         <span style="margin-left:12px"><i style="background:rgba(255,122,110,0.55)"></i>thermal stall</span>
-        <button id="nowbtn">back to now</button>
+        <button id="nowbtn" aria-label="Back to now"><span class="desktop-label">back to now</span><span class="mobile-label" aria-hidden="true">↶ Now</span></button>
       </span>
     </div>
     <canvas id="tlcanvas"></canvas>

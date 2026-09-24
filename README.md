@@ -8,6 +8,15 @@ its crops need.
 
 `index.html` renders the platform.
 
+On screens up to 940 px wide, the dashboard scrolls vertically through the map,
+crops, timeline, water and structure panels. Replay settings use the ↺ button;
+map zoom and flight controls have larger touch targets.
+
+To check responsive layouts, run `python3 -m http.server 8879` and open
+`http://localhost:8879/__tests__/mobile-layout.html`. It checks phone, landscape,
+tablet and desktop sizes. The neighboring `header-layout.html` checks that
+changing weather readouts does not shift the header.
+
 ## Historical replay
 
 Open **Replay…** under the mission clock, choose a UTC date and time, and select

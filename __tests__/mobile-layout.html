@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Mobile layout regression</title>
+<style>body { font: 14px monospace; } iframe { display: block; border: 0; margin-bottom: 20px; }</style>
+<h1>Mobile layout regression</h1>
+<pre id="results">Running…</pre>
+<script>
+(async () => {
+  const results = [];
+  const check = (condition, label) => results.push(`${condition ? 'PASS' : 'FAIL'} ${label}`);
+  for (const [width, height] of [[320, 568], [390, 844], [844, 390], [768, 1024], [940, 700], [1440, 900]]) {
+    const frame = document.createElement('iframe');
+    frame.width = width;
+    frame.height = height;
+    const loaded = new Promise(resolve => frame.onload = resolve);
+    frame.src = '../index.html?weather=simulated&layout-test=' + Date.now();
+    document.body.append(frame);
+    await loaded;
+    const doc = frame.contentDocument;
+    const rect = selector => doc.querySelector(selector).getBoundingClientRect();
+    const panels = ['#position', '#crops', '#move', '#water', '#systems'];
+    for (const selector of panels) {
+      const box = rect(selector);
+      check(box.width > 0 && box.left >= 0 && box.right <= width, `${width}px ${selector} visible within viewport`);
+    }
+    check(rect('#position').top >= rect('#top').bottom, `${width}px map clears header`);
+    check(doc.documentElement.scrollWidth <= width, `${width}px no horizontal page overflow`);
+    if (width <= 940) {
+      const hud = doc.querySelector('#hud');
+      hud.scrollTop = hud.scrollHeight;
+      check(rect('#tl').bottom <= height + 1, `${width}px timeline reachable by scrolling`);
+      hud.scrollTop = 0;
+      for (const selector of ['#zoomin', '#zoomout', '#pressure-level', '#replay-settings summary']) {
+        const box = rect(selector);
+        check(box.width >= 44 && box.height >= 44, `${width}px ${selector} touch target`);
+      }
+      doc.querySelector('#replay-settings').open = true;
+      const form = rect('#replay-form');
+      check(form.left >= 0 && form.right <= width, `${width}px replay form fits`);
+      doc.querySelector('#replay-settings').open = false;
+      doc.querySelector('#replay-speed').hidden = false;
+      const clockCell = doc.querySelector('#clock').parentElement.getBoundingClientRect();
+      check(rect('#replay-state').bottom <= clockCell.bottom, `${width}px replay controls fit clock cell`);
+      check(hud.scrollWidth <= width, `${width}px dashboard has no horizontal overflow`);
+      const boxes = panels.map(rect).sort((a, b) => a.top - b.top);
+      check(boxes.every((box, index) => !index || box.top >= boxes[index - 1].bottom), `${width}px panels do not overlap`);
+      doc.querySelector('#toptoggle').click();
+      check(rect('#position').top >= rect('#top').bottom, `${width}px collapsed header clears map`);
+      doc.querySelector('#tltoggle').click();
+      check(rect('#tlcanvas').height === 0, `${width}px timeline collapses`);
+    }
+  }
+  document.querySelector('#results').textContent = results.join('\n');
+})().catch(error => document.querySelector('#results').textContent = 'ERROR ' + error.stack);
+</script>
+</html>
