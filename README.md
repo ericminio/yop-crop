@@ -49,8 +49,13 @@ forecast outlook then follows the live forecast window; the label changes to
 **Catching up**.
 
 Replay weather is requested on a 0.25° coordinate grid to reuse nearby weather
-while moving quickly. Cache entries are separated by game date, and archived
-values do not expire every 15 real minutes; recent live forecasts still do.
+while moving quickly. Requests within the same grid cell are deduplicated, and
+downloaded hourly and daily coverage is reused across game dates. Crossing
+midnight does not fetch again when that time is already cached. New archive
+windows are merged with earlier data for the cell; uncovered times and new cells
+still fetch. Archive and recent live data remain separate, and archived values
+do not expire every 15 real minutes; recent live forecasts still do. The cache
+is in memory and is cleared on page reload.
 Requests include up to 92 prior days,
 as in live mode. Network retries still use real time; archive requests time out
 after 45 seconds. The clock keeps its selected speed during outages.
